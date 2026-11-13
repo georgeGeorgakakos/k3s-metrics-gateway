@@ -175,12 +175,27 @@ python scripts/render_manifest.py \
 
 See [`deploy/examples/cluster_builder_deploy.py`](deploy/examples/cluster_builder_deploy.py).
 
-**On an existing cluster:**
+**On an existing cluster, straight from the latest release:**
+
+```bash
+kubectl apply -f https://github.com/georgeGeorgakakos/k3s-metrics-gateway/releases/latest/download/swch-metrics-gateway.yaml
+```
+
+**Or from a clone:**
 
 ```bash
 kubectl apply -f deploy/k3s/swch-metrics-gateway.yaml
 # or on the k3s server node:
 sudo cp deploy/k3s/swch-metrics-gateway.yaml /var/lib/rancher/k3s/server/manifests/
+```
+
+**Check the gateway:**
+
+```bash
+kubectl -n swarm-system get pods                                   # swch-metrics-gateway-… Running
+kubectl -n swarm-system get cm swch-metrics-topology -o yaml       # topology published for EMS
+kubectl -n swarm-system port-forward svc/swch-metrics-gateway 8000:8000
+# → http://localhost:8000/docs   (try /pods/usage, /nodes/usage, /topology)
 ```
 
 ### 2. Deploy EMS as usual
@@ -206,6 +221,16 @@ kubectl -n swarm-system port-forward svc/swch-metrics-client-ui 8090:8090
 ```
 
 To reach the UI from outside the cluster, render with `--expose-ui nodeport`; it is then on port `30890` of every node.
+
+### 4. Confirm EMS receives the metrics
+
+```bash
+kubectl -n swarm-system port-forward svc/emsserver-ems-server 61610:61610
+python EMSClient.py --host localhost --port 61610 --topic "/topic/swch_k3s_>"   # from Swarmchestrate/EMSTopicConsumer
+```
+
+Messages such as `swch_k3s_node_cpu_pct` and `swch_k3s_pod_cpu_millicores` should arrive at each collector's interval.
+If the EMS metric model expects `*_SENSOR` topics, open the UI → **Sinks** → `ems` and set the destination to `/topic/{metric}_SENSOR`.
 
 ---
 
@@ -385,6 +410,13 @@ Pushing a tag `vX.Y.Z` that matches `pyproject.toml` triggers [`release.yml`](.g
 3. Attaches `swch-metrics-gateway.yaml` and `ems-sidecar-patch.yaml` to the GitHub release.
 
 The image name comes from the repository owner, so the workflow works under the org or a personal fork.
+
+### One-time repository setup
+
+1. **Pages:** in **Settings → Pages**, set **Source** to **GitHub Actions**. The project page and the
+   [live demo](https://georgegeorgakakos.github.io/k3s-metrics-gateway/demo/) are published on every push to `main`.
+2. **Package visibility:** after the first release, open **Packages → k3s-metrics-gateway → Package settings** and make it **Public**,
+   so k3s nodes can pull `ghcr.io/georgegeorgakakos/k3s-metrics-gateway` without credentials.
 
 ---
 
