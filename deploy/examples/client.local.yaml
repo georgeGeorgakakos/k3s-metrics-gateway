@@ -1,0 +1,29 @@
+# Run the client on your workstation against a port-forwarded gateway:
+#   kubectl -n swarm-system port-forward svc/swch-metrics-gateway 8000:8000
+#   kubectl -n swarm-system port-forward svc/emsserver-ems-server 61610:61610   # optional
+#   make run-client  ->  http://localhost:8090
+client_name: swch-metrics-client-local
+default_interval: 15s
+metric_prefix: swch_k3s_
+labels:
+  swarm_id: ${SWARM_ID:-local-dev}
+gateway:
+  url: http://localhost:8000
+  api_key: ${GATEWAY_API_KEY:-}
+ui:
+  port: 8090
+persist:
+  mode: file
+  path: /tmp/swch-client.yaml
+sinks:
+  - id: ems
+    type: ems_stomp
+    enabled: false
+    options: {host: localhost, port: 61610, username: aaa, password: "111", destination: "/topic/{metric}"}
+  - id: log
+    type: log
+    options: {max_lines: 5}
+collectors:
+  - {id: nodes, type: node_usage, interval: 15s}
+  - {id: pods, type: pod_usage, interval: 15s, exclude_namespaces: [kube-system]}
+  - {id: topology, type: topology, interval: 1m}

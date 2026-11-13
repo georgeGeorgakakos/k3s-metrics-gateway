@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Swarmchestrate · k3s Metrics Client</title>
+  <link rel="icon" type="image/png" href="ui/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;700;800&display=swap">
+  <link rel="stylesheet" href="ui/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <a class="brand" href="#dashboard" aria-label="Swarmchestrate">
+      <img id="logo" src="https://www.swarmchestrate.eu/wp-content/uploads/2024/04/logo-horizontal.png"
+           alt="Swarmchestrate" onerror="this.hidden=true;document.getElementById('wordmark').hidden=false">
+      <span id="wordmark" class="wordmark" hidden>SWARM<b>CHESTRATE</b></span>
+    </a>
+    <div class="product">
+      <span class="product-name">k3s Metrics Client</span>
+      <span class="product-sub">EMS sidecar</span>
+    </div>
+    <div class="pills">
+      <span class="pill" id="pill-demo" hidden title="Running with simulated data">DEMO</span>
+      <span class="pill" id="pill-gw" title="Metrics gateway"><i></i>Gateway</span>
+      <span class="pill" id="pill-ems" title="EMS broker sink"><i></i>EMS</span>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap hero-inner">
+    <div>
+      <div class="eyebrow" id="hero-eyebrow">Cluster</div>
+      <h1 id="hero-title">Connecting…</h1>
+      <div class="hero-meta" id="hero-meta"></div>
+    </div>
+    <div class="hero-stats" id="hero-stats"></div>
+  </div>
+  <nav class="wrap tabs" id="tabs">
+    <a href="#dashboard" data-tab="dashboard">Dashboard</a>
+    <a href="#collectors" data-tab="collectors">Collectors</a>
+    <a href="#sinks" data-tab="sinks">Sinks</a>
+    <a href="#topology" data-tab="topology">Topology</a>
+    <a href="#samples" data-tab="samples">Samples</a>
+    <a href="#settings" data-tab="settings">Configuration</a>
+  </nav>
+</section>
+
+<main class="wrap">
+  <!-- DASHBOARD -->
+  <section class="view" id="view-dashboard">
+    <div class="kpis" id="kpis"></div>
+    <div class="card">
+      <div class="card-head">
+        <h2>Live metrics</h2>
+        <div class="controls">
+          <select id="metric-select" aria-label="Metric"></select>
+          <label class="check"><input type="checkbox" id="chart-pause"> Pause</label>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="chart" height="320"></canvas><div class="tooltip" id="tooltip" hidden></div></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-head"><h2>Collectors</h2><a class="link" href="#collectors">Manage →</a></div>
+        <table class="table" id="dash-collectors"></table>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Sinks</h2><a class="link" href="#sinks">Manage →</a></div>
+        <div id="dash-sinks" class="sink-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COLLECTORS -->
+  <section class="view" id="view-collectors" hidden>
+    <div class="card">
+      <div class="card-head">
+        <div><h2>Collectors</h2><p class="muted">Each collector polls one gateway endpoint on its own interval and publishes samples to the selected sinks.</p></div>
+        <button class="btn primary" id="add-collector">+ Add collector</button>
+      </div>
+      <table class="table" id="collectors-table"></table>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Available collector types</h2></div>
+      <div class="type-grid" id="collector-types"></div>
+    </div>
+  </section>
+
+  <!-- SINKS -->
+  <section class="view" id="view-sinks" hidden>
+    <div class="card">
+      <div class="card-head">
+        <div><h2>Sinks</h2><p class="muted">Where samples go. As an EMS sidecar the broker is reachable on <code>localhost:61610</code>.</p></div>
+        <button class="btn primary" id="add-sink">+ Add sink</button>
+      </div>
+      <table class="table" id="sinks-table"></table>
+    </div>
+  </section>
+
+  <!-- TOPOLOGY -->
+  <section class="view" id="view-topology" hidden>
+    <div class="card">
+      <div class="card-head"><h2>Topology</h2><span class="muted" id="topo-hash"></span></div>
+      <div id="topo-diagram" class="topo-diagram"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Nodes</h2></div>
+      <table class="table" id="nodes-table"></table>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Metric endpoints advertised to EMS</h2></div>
+      <table class="table" id="endpoints-table"></table>
+    </div>
+  </section>
+
+  <!-- SAMPLES -->
+  <section class="view" id="view-samples" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h2>Latest samples</h2>
+        <div class="controls">
+          <select id="sample-collector"><option value="">All collectors</option></select>
+          <input id="sample-filter" type="search" placeholder="Filter metric, pod, node…">
+        </div>
+      </div>
+      <table class="table mono" id="samples-table"></table>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="view" id="view-settings" hidden>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-head"><h2>General</h2></div>
+        <form id="general-form" class="form"></form>
+        <div class="actions"><button class="btn primary" id="save-general">Save &amp; apply</button></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Persistence</h2></div>
+        <p class="muted">Saved configuration is written to <code>/data/client.yaml</code> and, through the gateway, to the
+          <code>swch-metrics-client-config-saved</code> ConfigMap, so it survives pod restarts and is never overwritten when k3s re-applies the deployment manifest.</p>
+        <dl class="kv" id="persist-info"></dl>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>client.yaml</h2>
+        <div class="controls">
+          <button class="btn" id="yaml-validate">Validate</button>
+          <a class="btn" id="yaml-download" href="api/config/download">Download</a>
+          <button class="btn primary" id="yaml-save">Save &amp; apply</button>
+        </div>
+      </div>
+      <textarea id="yaml-editor" spellcheck="false"></textarea>
+      <div id="yaml-msg" class="msg"></div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <div>
+      <strong>Swarmchestrate</strong> — Application-level Swarm-based Orchestration Across the Cloud-to-Edge Continuum
+      <div class="muted-light">Funded by the European Union, Horizon Europe grant agreement No. 101135012.</div>
+    </div>
+    <div class="muted-light" id="version"></div>
+  </div>
+</footer>
+
+<dialog id="modal">
+  <form method="dialog" id="modal-form">
+    <header><h3 id="modal-title"></h3><button class="x" value="cancel" aria-label="Close">×</button></header>
+    <div id="modal-body" class="form"></div>
+    <div id="modal-msg" class="msg"></div>
+    <footer>
+      <button class="btn" value="cancel">Cancel</button>
+      <button class="btn primary" id="modal-ok" value="ok">Save &amp; apply</button>
+    </footer>
+  </form>
+</dialog>
+<div class="toast" id="toast" hidden></div>
+
+<script src="ui/app.js"></script>
+</body>
+</html>

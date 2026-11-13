@@ -1,0 +1,887 @@
+{
+ "types": [
+  {
+   "type": "apiserver_health",
+   "title": "API server health",
+   "description": "1/0 for API server livez and readyz.",
+   "endpoint": "/apiserver/health",
+   "default_interval": "30s",
+   "params": {},
+   "outputs": [
+    "apiserver_livez",
+    "apiserver_readyz"
+   ]
+  },
+  {
+   "type": "cadvisor",
+   "title": "cAdvisor container metrics",
+   "description": "Any cAdvisor metric by name prefix across all nodes, e.g. container_cpu_cfs_throttled_periods_total. Counters can be converted to per-second rates.",
+   "endpoint": "/cadvisor",
+   "default_interval": "60s",
+   "params": {
+    "metric": {
+     "type": "string",
+     "default": "container_cpu_cfs_throttled_periods_total",
+     "description": "Metric name prefix",
+     "required": true
+    },
+    "namespace": {
+     "type": "string",
+     "default": null,
+     "description": "Namespace (empty = all namespaces)",
+     "required": false
+    },
+    "rate": {
+     "type": "boolean",
+     "default": true,
+     "description": "Emit per-second rate for counters (_total)",
+     "required": false
+    },
+    "sum_by_pod": {
+     "type": "boolean",
+     "default": true,
+     "description": "Sum container series per pod",
+     "required": false
+    }
+   },
+   "outputs": []
+  },
+  {
+   "type": "events",
+   "title": "Kubernetes events",
+   "description": "New cluster events since the last poll (e.g. OOMKilled, BackOff, FailedScheduling). Value = event count.",
+   "endpoint": "/events",
+   "default_interval": "60s",
+   "params": {
+    "namespace": {
+     "type": "string",
+     "default": null,
+     "description": "Namespace (empty = all namespaces)",
+     "required": false
+    },
+    "type": {
+     "type": "string",
+     "default": "Warning",
+     "description": "Event type",
+     "required": false,
+     "enum": [
+      "Warning",
+      "Normal",
+      ""
+     ]
+    },
+    "reasons": {
+     "type": "list",
+     "default": [],
+     "description": "Only these reasons (empty = all)",
+     "required": false
+    }
+   },
+   "outputs": [
+    "k8s_event"
+   ]
+  },
+  {
+   "type": "http_json",
+   "title": "Generic gateway endpoint",
+   "description": "Poll any gateway endpoint returning JSON and map fields to metrics: items_path selects the list, value_field the value, label_fields the labels.",
+   "endpoint": "(custom)",
+   "default_interval": "60s",
+   "params": {
+    "path": {
+     "type": "string",
+     "default": "/nodes/usage",
+     "description": "Gateway path",
+     "required": true
+    },
+    "query": {
+     "type": "json",
+     "default": {},
+     "description": "Query parameters as JSON object",
+     "required": false
+    },
+    "items_path": {
+     "type": "string",
+     "default": "",
+     "description": "Dotted path to the list of items ('' = root)",
+     "required": false
+    },
+    "value_field": {
+     "type": "string",
+     "default": "cpu_pct",
+     "description": "Dotted path to the numeric value",
+     "required": true
+    },
+    "metric_name": {
+     "type": "string",
+     "default": "custom_value",
+     "description": "Metric name to emit",
+     "required": true
+    },
+    "label_fields": {
+     "type": "list",
+     "default": [
+      "node"
+     ],
+     "description": "Fields copied to labels",
+     "required": false
+    },
+    "instance_field": {
+     "type": "string",
+     "default": "node",
+     "description": "Field used as EMS instance",
+     "required": false
+    }
+   },
+   "outputs": []
+  },
+  {
+   "type": "node_usage",
+   "title": "Node CPU & memory",
+   "description": "CPU/memory per node with percentage of allocatable (kubectl top nodes).",
+   "endpoint": "/nodes/usage",
+   "default_interval": "30s",
+   "params": {},
+   "outputs": [
+    "node_cpu_millicores",
+    "node_cpu_pct",
+    "node_memory_mib",
+    "node_memory_pct"
+   ]
+  },
+  {
+   "type": "pod_overview",
+   "title": "Pod utilisation vs requests/limits",
+   "description": "Usage joined with requests and limits: % of request/limit, restarts and running state per pod.",
+   "endpoint": "/pods/overview",
+   "default_interval": "60s",
+   "params": {
+    "namespace": {
+     "type": "string",
+     "default": null,
+     "description": "Namespace (empty = all namespaces)",
+     "required": false
+    },
+    "label_selector": {
+     "type": "string",
+     "default": null,
+     "description": "Label selector, e.g. app=web",
+     "required": false
+    }
+   },
+   "outputs": [
+    "pod_cpu_pct_of_request",
+    "pod_cpu_pct_of_limit",
+    "pod_memory_pct_of_request",
+    "pod_memory_pct_of_limit",
+    "pod_restarts",
+    "pod_running"
+   ]
+  },
+  {
+   "type": "pod_stats",
+   "title": "Pod network, disk & volumes",
+   "description": "Kubelet summary per pod: CPU, working-set memory, network rx/tx, ephemeral storage and volume usage.",
+   "endpoint": "/pods/stats",
+   "default_interval": "60s",
+   "params": {
+    "namespace": {
+     "type": "string",
+     "default": null,
+     "description": "Namespace (empty = all namespaces)",
+     "required": false
+    },
+    "rate": {
+     "type": "boolean",
+     "default": true,
+     "description": "Convert network byte counters to bytes/second",
+     "required": false
+    }
+   },
+   "outputs": [
+    "pod_cpu_millicores",
+    "pod_memory_working_set_mib",
+    "pod_network_rx_bytes_per_sec",
+    "pod_network_tx_bytes_per_sec",
+    "pod_network_rx_bytes_total",
+    "pod_network_tx_bytes_total",
+    "pod_ephemeral_storage_used_mib",
+    "pod_volume_used_mib",
+    "pod_volume_used_pct"
+   ]
+  },
+  {
+   "type": "pod_usage",
+   "title": "Pod CPU & memory",
+   "description": "Current CPU (millicores) and memory (MiB) per pod from metrics-server (kubectl top pods).",
+   "endpoint": "/pods/usage",
+   "default_interval": "30s",
+   "params": {
+    "namespace": {
+     "type": "string",
+     "default": null,
+     "description": "Namespace (empty = all namespaces)",
+     "required": false
+    },
+    "per_container": {
+     "type": "boolean",
+     "default": false,
+     "description": "Also emit per-container values",
+     "required": false
+    }
+   },
+   "outputs": [
+    "pod_cpu_millicores",
+    "pod_memory_mib",
+    "container_cpu_millicores",
+    "container_memory_mib"
+   ]
+  },
+  {
+   "type": "prometheus",
+   "title": "PromQL query",
+   "description": "Instant PromQL query through the gateway (requires PROMETHEUS_URL on the gateway).",
+   "endpoint": "/prometheus/query",
+   "default_interval": "60s",
+   "params": {
+    "query": {
+     "type": "string",
+     "default": "sum by (namespace,pod) (rate(container_cpu_usage_seconds_total{container!=\"\"}[5m]))",
+     "description": "PromQL expression",
+     "required": true
+    },
+    "name": {
+     "type": "string",
+     "default": "promql_value",
+     "description": "Metric name to emit",
+     "required": true
+    },
+    "instance_label": {
+     "type": "string",
+     "default": "pod",
+     "description": "Label used as EMS instance",
+     "required": false
+    }
+   },
+   "outputs": []
+  },
+  {
+   "type": "topology",
+   "title": "Cluster topology",
+   "description": "Cluster identity, nodes, zones and endpoint catalog. Emits node readiness numbers every poll and the full topology document (topic <prefix>topology) whenever it changes.",
+   "endpoint": "/topology",
+   "default_interval": "2m",
+   "params": {
+    "publish_document": {
+     "type": "boolean",
+     "default": true,
+     "description": "Publish the full JSON document on change",
+     "required": false
+    }
+   },
+   "outputs": [
+    "cluster_nodes_total",
+    "cluster_nodes_ready",
+    "node_ready",
+    "topology"
+   ]
+  }
+ ],
+ "sink_types": [
+  {
+   "type": "ems_stomp",
+   "title": "EMS broker (STOMP)",
+   "description": "Publish to the EMS broker topics so EMS/EPM can use the metrics in its metric model and SLOs.",
+   "options": {
+    "host": {
+     "type": "string",
+     "default": "localhost",
+     "description": "Broker host (localhost when running as EMS sidecar)",
+     "required": false
+    },
+    "port": {
+     "type": "integer",
+     "default": 61610,
+     "description": "STOMP port",
+     "required": false
+    },
+    "username": {
+     "type": "string",
+     "default": "",
+     "description": "Broker username",
+     "required": false
+    },
+    "password": {
+     "type": "secret",
+     "default": "",
+     "description": "Broker password",
+     "required": false
+    },
+    "destination": {
+     "type": "string",
+     "default": "/topic/{metric}",
+     "description": "Destination template; placeholders {metric} {collector} {instance}",
+     "required": false
+    },
+    "body_format": {
+     "type": "string",
+     "default": "ems_event",
+     "description": "Message body",
+     "required": false,
+     "enum": [
+      "ems_event",
+      "json",
+      "headers_only"
+     ]
+    },
+    "level": {
+     "type": "integer",
+     "default": 1,
+     "description": "EMS event level",
+     "required": false
+    },
+    "include_labels_as_headers": {
+     "type": "boolean",
+     "default": true,
+     "description": "Copy labels as 'label-<name>' headers",
+     "required": false
+    },
+    "heartbeat_ms": {
+     "type": "integer",
+     "default": 10000,
+     "description": "STOMP heart-beat (0 = off)",
+     "required": false
+    },
+    "max_messages_per_batch": {
+     "type": "integer",
+     "default": 5000,
+     "description": "Safety cap per collection cycle",
+     "required": false
+    }
+   }
+  },
+  {
+   "type": "jsonl",
+   "title": "JSONL archive",
+   "description": "Append samples to a JSON-lines file with size-based rotation.",
+   "options": {
+    "path": {
+     "type": "string",
+     "default": "/data/metrics.jsonl",
+     "description": "File path",
+     "required": false
+    },
+    "max_mb": {
+     "type": "integer",
+     "default": 50,
+     "description": "Rotate when larger than this (MiB)",
+     "required": false
+    }
+   }
+  },
+  {
+   "type": "log",
+   "title": "Container log",
+   "description": "Write samples to the container log (kubectl logs). Useful for debugging.",
+   "options": {
+    "max_lines": {
+     "type": "integer",
+     "default": 20,
+     "description": "Max lines per batch (0 = all)",
+     "required": false
+    }
+   }
+  },
+  {
+   "type": "webhook",
+   "title": "HTTP webhook",
+   "description": "POST each batch as JSON to an HTTP endpoint (e.g. OptimusDB, a data lake ingest, n8n).",
+   "options": {
+    "url": {
+     "type": "string",
+     "default": "",
+     "description": "Target URL",
+     "required": true
+    },
+    "headers": {
+     "type": "json",
+     "default": {},
+     "description": "Extra HTTP headers",
+     "required": false
+    },
+    "timeout": {
+     "type": "integer",
+     "default": 10,
+     "description": "Timeout (s)",
+     "required": false
+    }
+   }
+  }
+ ],
+ "config": {
+  "client_name": "swch-metrics-client",
+  "default_interval": "30s",
+  "metric_prefix": "swch_k3s_",
+  "labels": {
+   "swarm_id": "${SWARM_ID:-}",
+   "cluster": "${CLUSTER_NAME:-}",
+   "cloud": "${CLOUD:-}",
+   "region": "${REGION:-}",
+   "zone": "${ZONE:-}"
+  },
+  "gateway": {
+   "url": "${GATEWAY_URL:-http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000}",
+   "api_key": "${GATEWAY_API_KEY:-}",
+   "timeout": 10
+  },
+  "ui": {
+   "enabled": true,
+   "port": 8090,
+   "username": "admin",
+   "password": "${UI_PASSWORD:-}"
+  },
+  "persist": {
+   "mode": "gateway",
+   "path": "/data/client.yaml"
+  },
+  "sinks": [
+   {
+    "id": "ems",
+    "type": "ems_stomp",
+    "enabled": true,
+    "options": {
+     "host": "${EMS_BROKER_HOST:-localhost}",
+     "port": 61610,
+     "username": "${EMS_BROKER_USERNAME:-aaa}",
+     "password": "${EMS_BROKER_PASSWORD:-111}",
+     "destination": "/topic/{metric}",
+     "body_format": "ems_event"
+    }
+   },
+   {
+    "id": "log",
+    "type": "log",
+    "enabled": false,
+    "options": {
+     "max_lines": 20
+    }
+   }
+  ],
+  "collectors": [
+   {
+    "id": "nodes",
+    "type": "node_usage",
+    "interval": "30s"
+   },
+   {
+    "id": "pods",
+    "type": "pod_usage",
+    "interval": "30s",
+    "exclude_namespaces": [
+     "kube-system"
+    ]
+   },
+   {
+    "id": "pod-utilisation",
+    "type": "pod_overview",
+    "interval": "60s",
+    "exclude_namespaces": [
+     "kube-system"
+    ],
+    "metrics": [
+     "pod_cpu_pct_of_limit",
+     "pod_memory_pct_of_limit",
+     "pod_restarts"
+    ]
+   },
+   {
+    "id": "warnings",
+    "type": "events",
+    "interval": "60s",
+    "params": {
+     "type": "Warning"
+    }
+   },
+   {
+    "id": "topology",
+    "type": "topology",
+    "interval": "2m"
+   }
+  ]
+ },
+ "labels": {
+  "swarm_id": "swarm-demo-01",
+  "cluster": "swch-demo"
+ },
+ "topology": {
+  "schema": "swarmchestrate.eu/metrics-topology/v1",
+  "swarm_id": "swarm-demo-01",
+  "cluster_id": "5f1c2a7e-3b9d-4c61-9a0e-7d2b8c4e1f90",
+  "cluster_name": "swch-demo",
+  "distribution": "k3s",
+  "kubernetes_version": "v1.33.4+k3s1",
+  "api_server": "https://10.0.1.10:6443",
+  "gateway": {
+   "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000",
+   "openapi": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/openapi.json",
+   "auth": "none",
+   "namespace": "swarm-system"
+  },
+  "summary": {
+   "nodes": 3,
+   "ready": 3,
+   "control_plane": 1,
+   "zones": [
+    "edge-athens",
+    "eu-west-1a",
+    "sztaki-cloud"
+   ],
+   "regions": [
+    "eu-west-1",
+    "gr-athens",
+    "hu-budapest"
+   ],
+   "clouds": [
+    "aws",
+    "edge",
+    "openstack"
+   ]
+  },
+  "capabilities": {
+   "metrics.k8s.io": true,
+   "custom.metrics.k8s.io": "unavailable (404)",
+   "external.metrics.k8s.io": "unavailable (404)",
+   "apiserver /metrics": true,
+   "kubelet (stats/cadvisor via nodes/proxy)": true,
+   "prometheus": "not configured (set PROMETHEUS_URL)"
+  },
+  "nodes": [
+   {
+    "name": "swch-master-aws",
+    "uid": "uid-swch-master-aws",
+    "roles": [
+     "control-plane",
+     "master"
+    ],
+    "internal_ip": "10.0.1.10",
+    "external_ip": null,
+    "hostname": null,
+    "region": "eu-west-1",
+    "zone": "eu-west-1a",
+    "cloud": "aws",
+    "instance_type": null,
+    "arch": "amd64",
+    "os_image": "Ubuntu 24.04.1 LTS",
+    "kubelet_version": "v1.33.4+k3s1",
+    "container_runtime": "containerd://2.0.5-k3s2",
+    "pod_cidr": "10.42.0.0/24",
+    "ready": true,
+    "conditions": {
+     "Ready": "True"
+    },
+    "unschedulable": false,
+    "capacity": {
+     "cpu": "4",
+     "memory": "7834380Ki",
+     "pods": "110"
+    },
+    "allocatable": {
+     "cpu": "4",
+     "memory": "7834380Ki",
+     "pods": "110"
+    },
+    "labels": {
+     "node-role.kubernetes.io/control-plane": "true",
+     "node-role.kubernetes.io/master": "true",
+     "topology.kubernetes.io/region": "eu-west-1",
+     "topology.kubernetes.io/zone": "eu-west-1a",
+     "swarmchestrate.eu/cloud": "aws",
+     "kubernetes.io/arch": "amd64"
+    },
+    "metrics": {
+     "kubelet_summary": "/nodes/swch-master-aws/summary",
+     "cadvisor": "/nodes/swch-master-aws/cadvisor",
+     "probes": "/nodes/swch-master-aws/probes"
+    }
+   },
+   {
+    "name": "swch-worker-openstack",
+    "uid": "uid-swch-worker-openstack",
+    "roles": [
+     "worker"
+    ],
+    "internal_ip": "192.168.10.21",
+    "external_ip": null,
+    "hostname": null,
+    "region": "hu-budapest",
+    "zone": "sztaki-cloud",
+    "cloud": "openstack",
+    "instance_type": null,
+    "arch": "amd64",
+    "os_image": "Ubuntu 24.04.1 LTS",
+    "kubelet_version": "v1.33.4+k3s1",
+    "container_runtime": "containerd://2.0.5-k3s2",
+    "pod_cidr": "10.42.0.0/24",
+    "ready": true,
+    "conditions": {
+     "Ready": "True"
+    },
+    "unschedulable": false,
+    "capacity": {
+     "cpu": "8",
+     "memory": "16231716Ki",
+     "pods": "110"
+    },
+    "allocatable": {
+     "cpu": "8",
+     "memory": "16231716Ki",
+     "pods": "110"
+    },
+    "labels": {
+     "topology.kubernetes.io/region": "hu-budapest",
+     "topology.kubernetes.io/zone": "sztaki-cloud",
+     "swarmchestrate.eu/cloud": "openstack",
+     "kubernetes.io/arch": "amd64"
+    },
+    "metrics": {
+     "kubelet_summary": "/nodes/swch-worker-openstack/summary",
+     "cadvisor": "/nodes/swch-worker-openstack/cadvisor",
+     "probes": "/nodes/swch-worker-openstack/probes"
+    }
+   },
+   {
+    "name": "swch-worker-edge",
+    "uid": "uid-swch-worker-edge",
+    "roles": [
+     "worker"
+    ],
+    "internal_ip": "172.16.5.30",
+    "external_ip": null,
+    "hostname": null,
+    "region": "gr-athens",
+    "zone": "edge-athens",
+    "cloud": "edge",
+    "instance_type": null,
+    "arch": "arm64",
+    "os_image": "Ubuntu 24.04.1 LTS",
+    "kubelet_version": "v1.33.4+k3s1",
+    "container_runtime": "containerd://2.0.5-k3s2",
+    "pod_cidr": "10.42.0.0/24",
+    "ready": true,
+    "conditions": {
+     "Ready": "True"
+    },
+    "unschedulable": false,
+    "capacity": {
+     "cpu": "4",
+     "memory": "3922168Ki",
+     "pods": "110"
+    },
+    "allocatable": {
+     "cpu": "4",
+     "memory": "3922168Ki",
+     "pods": "110"
+    },
+    "labels": {
+     "topology.kubernetes.io/region": "gr-athens",
+     "topology.kubernetes.io/zone": "edge-athens",
+     "swarmchestrate.eu/cloud": "edge",
+     "kubernetes.io/arch": "arm64"
+    },
+    "metrics": {
+     "kubelet_summary": "/nodes/swch-worker-edge/summary",
+     "cadvisor": "/nodes/swch-worker-edge/cadvisor",
+     "probes": "/nodes/swch-worker-edge/probes"
+    }
+   }
+  ],
+  "endpoints": [
+   {
+    "id": "pods_usage",
+    "path": "/pods/usage",
+    "source": "metrics.k8s.io",
+    "description": "CPU (millicores) and memory (MiB) per pod and container",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/pods/usage",
+    "available": true
+   },
+   {
+    "id": "pod_usage",
+    "path": "/pods/{namespace}/{pod}/usage",
+    "source": "metrics.k8s.io",
+    "description": "CPU/memory for a single pod",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/pods/{namespace}/{pod}/usage",
+    "available": true
+   },
+   {
+    "id": "nodes_usage",
+    "path": "/nodes/usage",
+    "source": "metrics.k8s.io",
+    "description": "CPU/memory per node with % of allocatable",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/nodes/usage",
+    "available": true
+   },
+   {
+    "id": "pods_stats",
+    "path": "/pods/stats",
+    "source": "kubelet",
+    "description": "Per-pod CPU, memory, network, ephemeral storage and volumes",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/pods/stats",
+    "available": true
+   },
+   {
+    "id": "node_summary",
+    "path": "/nodes/{node}/summary",
+    "source": "kubelet",
+    "description": "Raw kubelet /stats/summary",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/nodes/{node}/summary",
+    "available": true
+   },
+   {
+    "id": "cadvisor",
+    "path": "/cadvisor?metric={prefix}",
+    "source": "kubelet",
+    "description": "cAdvisor container metrics across all nodes (throttling, I/O, network)",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/cadvisor?metric={prefix}",
+    "available": true
+   },
+   {
+    "id": "node_cadvisor",
+    "path": "/nodes/{node}/cadvisor",
+    "source": "kubelet",
+    "description": "cAdvisor metrics of one node",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/nodes/{node}/cadvisor",
+    "available": true
+   },
+   {
+    "id": "node_resource",
+    "path": "/nodes/{node}/resource",
+    "source": "kubelet",
+    "description": "Kubelet /metrics/resource",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/nodes/{node}/resource",
+    "available": true
+   },
+   {
+    "id": "node_probes",
+    "path": "/nodes/{node}/probes",
+    "source": "kubelet",
+    "description": "Liveness/readiness/startup probe results",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/nodes/{node}/probes",
+    "available": true
+   },
+   {
+    "id": "node_kubelet",
+    "path": "/nodes/{node}/kubelet",
+    "source": "kubelet",
+    "description": "Kubelet operational metrics",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/nodes/{node}/kubelet",
+    "available": true
+   },
+   {
+    "id": "pods_status",
+    "path": "/pods/status",
+    "source": "core",
+    "description": "Phase, node, QoS, restarts, requests/limits",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/pods/status",
+    "available": true
+   },
+   {
+    "id": "pods_overview",
+    "path": "/pods/overview",
+    "source": "core",
+    "description": "Usage joined with requests/limits (% utilisation)",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/pods/overview",
+    "available": true
+   },
+   {
+    "id": "events",
+    "path": "/events",
+    "source": "core",
+    "description": "Cluster events (OOMKilled, BackOff, FailedScheduling)",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/events",
+    "available": true
+   },
+   {
+    "id": "nodes",
+    "path": "/nodes",
+    "source": "core",
+    "description": "Nodes with capacity, allocatable, conditions",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/nodes",
+    "available": true
+   },
+   {
+    "id": "apiserver_metrics",
+    "path": "/apiserver/metrics",
+    "source": "apiserver",
+    "description": "API server Prometheus metrics",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/apiserver/metrics",
+    "available": true
+   },
+   {
+    "id": "apiserver_health",
+    "path": "/apiserver/health",
+    "source": "apiserver",
+    "description": "API server livez/readyz",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/apiserver/health",
+    "available": true
+   },
+   {
+    "id": "custom_metrics",
+    "path": "/custom-metrics/{path}",
+    "source": "custom.metrics.k8s.io",
+    "description": "Custom metrics adapter passthrough",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/custom-metrics/{path}",
+    "available": false
+   },
+   {
+    "id": "external_metrics",
+    "path": "/external-metrics/{path}",
+    "source": "external.metrics.k8s.io",
+    "description": "External metrics adapter passthrough",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/external-metrics/{path}",
+    "available": false
+   },
+   {
+    "id": "prometheus_query",
+    "path": "/prometheus/query?q={promql}",
+    "source": "prometheus",
+    "description": "Instant PromQL query",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/prometheus/query?q={promql}",
+    "available": false
+   },
+   {
+    "id": "prometheus_query_range",
+    "path": "/prometheus/query_range",
+    "source": "prometheus",
+    "description": "Range PromQL query",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/prometheus/query_range",
+    "available": false
+   },
+   {
+    "id": "prometheus_presets",
+    "path": "/prometheus/pods/{preset}",
+    "source": "prometheus",
+    "description": "Ready-made pod PromQL presets",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/prometheus/pods/{preset}",
+    "available": false
+   },
+   {
+    "id": "topology",
+    "path": "/topology",
+    "source": "core",
+    "description": "This topology document",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/topology",
+    "available": true
+   },
+   {
+    "id": "raw",
+    "path": "/raw?path={api_path}",
+    "source": "core",
+    "description": "Any read-only API-server path",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/raw?path={api_path}",
+    "available": true
+   }
+  ],
+  "hash": "d8f85bd563a659da",
+  "updated_at": "2026-01-01T00:00:00+00:00"
+ }
+}

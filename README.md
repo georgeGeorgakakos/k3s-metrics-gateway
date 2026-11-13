@@ -1,0 +1,396 @@
+<p align="center">
+  <img src="https://www.swarmchestrate.eu/wp-content/uploads/2024/04/logo-horizontal.png" alt="Swarmchestrate" height="64">
+</p>
+
+<h1 align="center">k3s Metrics Gateway &amp; EMS Metrics Client</h1>
+
+<p align="center">
+  Per-cluster metrics &amp; topology API for every Swarmchestrate-orchestrated k3s cluster,<br>
+  plus a modular, UI-configurable metrics client that runs as a sidecar of EMS.
+</p>
+
+<p align="center">
+  <a href="https://georgegeorgakakos.github.io/k3s-metrics-gateway/demo/"><img alt="Live demo" src="https://img.shields.io/badge/live%20demo-UI-0455bf"></a>
+  <a href="../../actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/georgeGeorgakakos/k3s-metrics-gateway/ci.yml?label=CI"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-162d73"></a>
+  <img alt="Python" src="https://img.shields.io/badge/python-3.12%2B-0455bf">
+  <img alt="Horizon Europe" src="https://img.shields.io/badge/Horizon%20Europe-101135012-162d73">
+</p>
+
+---
+
+## Overview
+
+When Swarmchestrate deploys a k3s cluster, this repository adds three pieces to it:
+
+| Component | Runs as | Purpose |
+|---|---|---|
+| **Metrics Gateway** (`swch-gateway`) | `Deployment swch-metrics-gateway` in `swarm-system` | One REST API over all of the cluster's metrics sources: metrics-server, kubelet summary, cAdvisor, probes, core API, API server, custom/external metrics and optional Prometheus. |
+| **Topology publisher** (inside the gateway) | ConfigMap `swch-metrics-topology` | Tells EMS what the cluster looks like (swarm/cluster ID, nodes, zones, clouds, capacity) and where each metric can be fetched (endpoint catalog with availability). |
+| **Metrics Client** (`swch-metrics-client`) | **Sidecar container in the EMS pod** (`emsserver-ems-server`) | Modular collectors, each polling on its own interval. They publish to the EMS broker over STOMP (`localhost:61610`) and can be configured from a Swarmchestrate-branded web UI. |
+
+The gateway is shipped as a **k3s auto-deploy manifest**, so it fits the existing
+[`cluster-builder`](https://github.com/Swarmchestrate/cluster-builder) flow. `deploy_manifests()` copies it to
+`/var/lib/rancher/k3s/server/manifests/` and k3s applies it on its own.
+EMS is still deployed by [`swchmonclient`](https://github.com/Swarmchestrate/monitoring-client) as before.
+The gateway detects the EMS Deployment and attaches the sidecar automatically.
+
+**👉 [Try the UI with simulated data](https://georgegeorgakakos.github.io/k3s-metrics-gateway/demo/)** (runs entirely in the browser)
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph K3S["k3s cluster (one per Swarmchestrate deployment)"]
+    direction LR
+    subgraph SRC["Metric sources"]
+      MS["metrics-server<br/>metrics.k8s.io"]
+      KL["kubelet ×N<br/>/stats/summary · /metrics/cadvisor · /metrics/probes"]
+      API["kube-apiserver<br/>core API · /metrics · livez/readyz"]
+      ADP["custom / external<br/>metrics adapters"]
+      PROM[("Prometheus<br/>(optional)")]
+    end
+
+    subgraph SYS["namespace: swarm-system"]
+      GW["<b>swch-metrics-gateway</b><br/>REST :8000 · OpenAPI"]
+      TOPO[/"ConfigMap<br/><b>swch-metrics-topology</b><br/>topology.json · endpoints.json"/]
+      subgraph EMSPOD["Pod: emsserver-ems-server"]
+        EMS["<b>EMS server</b><br/>EPM · broker-CEP<br/>STOMP :61610"]
+        SC["<b>swch-metrics-client</b><br/>sidecar · UI :8090"]
+      end
+      CFG[/"ConfigMaps<br/>swch-metrics-client-config<br/>…-config-saved"/]
+    end
+  end
+
+  MS & KL & API & ADP & PROM --> GW
+  GW -- "publishes on change" --> TOPO
+  GW -. "attaches sidecar<br/>(strategic-merge patch)" .-> EMSPOD
+  TOPO -. "topology & endpoints" .-> EMS
+  SC -- "GET /pods/usage, /nodes/usage, /topology …<br/>each collector on its own interval" --> GW
+  SC == "STOMP localhost:61610<br/>/topic/swch_k3s_*" ==> EMS
+  CFG --> SC
+  SC -- "PUT /client-config (UI save)" --> GW
+  USER(["Operator<br/>browser"]) -- "port-forward / NodePort" --> SC
+
+  classDef swch fill:#0455bf,stroke:#162d73,color:#fff
+  classDef navy fill:#162d73,stroke:#162d73,color:#fff
+  classDef cm fill:#eef3fd,stroke:#0455bf,color:#162d73
+  class GW,SC swch
+  class EMS navy
+  class TOPO,CFG cm
+```
+
+### What happens on deployment
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant CB as cluster-builder
+  participant K3S as k3s (AddOn controller)
+  participant GW as swch-metrics-gateway
+  participant KAPI as kube-apiserver
+  participant MC as swchmonclient
+  participant EMS as EMS pod
+  participant SC as metrics-client sidecar
+
+  CB->>K3S: deploy_manifests() → /var/lib/rancher/k3s/server/manifests/swch-metrics-gateway.yaml
+  K3S->>KAPI: apply Namespace, RBAC, ConfigMaps, Secret, Deployment, Services
+  KAPI-->>GW: gateway pod starts
+  loop every 60 s
+    GW->>KAPI: nodes, versions, capability probes
+    GW->>KAPI: write ConfigMap swch-metrics-topology (only when the hash changes)
+  end
+  MC->>KAPI: deploy_monitoring() — EMS + Netdata (unchanged flow)
+  loop every 30 s
+    GW->>KAPI: GET deployment emsserver-ems-server
+    alt EMS present and no sidecar
+      GW->>KAPI: PATCH (strategic merge) add container swch-metrics-client
+    end
+  end
+  KAPI-->>EMS: EMS pod rolls out with the sidecar
+  loop each collector, own interval
+    SC->>GW: GET /nodes/usage, /pods/usage, /topology, …
+    SC->>EMS: STOMP SEND /topic/swch_k3s_<metric> (localhost:61610)
+  end
+```
+
+### Inside the client
+
+```mermaid
+flowchart LR
+  subgraph CFG["client.yaml"]
+    direction TB
+    C1["collectors[] — type, interval, params,<br/>namespaces, metrics, aggregate, sinks"]
+    S1["sinks[] — type, options"]
+  end
+  CFG --> ENG{{"Engine<br/>one asyncio task per collector"}}
+  ENG --> COL["Collector.collect()<br/>GET gateway endpoint"]
+  COL --> TR["transform()<br/>JSON → Samples"]
+  TR --> PP["post_process()<br/>namespace filters · metric whitelist ·<br/>cluster aggregates · prefix · static labels"]
+  PP --> FAN(("fan-out"))
+  FAN --> EMS["ems_stomp<br/>EMS broker"]
+  FAN --> JL["jsonl<br/>archive file"]
+  FAN --> WH["webhook<br/>HTTP POST"]
+  FAN --> LG["log<br/>stdout"]
+  PP --> MEM[("in-memory series<br/>→ UI charts")]
+  UI["Branded UI :8090"] -- "edit · validate · save & apply (hot reload)" --> CFG
+  MEM --> UI
+  classDef swch fill:#0455bf,stroke:#162d73,color:#fff
+  class ENG,UI swch
+```
+
+### Sidecar attachment lifecycle
+
+```mermaid
+stateDiagram-v2
+  [*] --> Waiting: gateway running
+  Waiting --> Waiting: EMS deployment not found (404)
+  Waiting --> Checking: emsserver-ems-server exists
+  Checking --> Present: container swch-metrics-client found
+  Checking --> Patching: missing
+  Patching --> Present: PATCH ok → EMS rolls out
+  Patching --> Waiting: PATCH failed (logged, retried)
+  Present --> Checking: next interval (e.g. EMS redeployed by swchmonclient)
+```
+
+> GitHub renders these diagrams natively. Use the controls on each figure to zoom, pan or view it full screen.
+> The same figures are also on the [project page](https://georgegeorgakakos.github.io/k3s-metrics-gateway/).
+
+---
+
+## Quick start
+
+### 1. Deploy the gateway with the cluster
+
+**With cluster-builder (recommended).** Render a manifest for the swarm and put it in the folder you pass to `deploy_manifests()`:
+
+```bash
+python scripts/render_manifest.py \
+  --swarm-id swarm-42 --cluster-name swch-demo --cloud aws --region eu-west-1 \
+  --api-key auto --ui-password auto \
+  -o manifests/swch-metrics-gateway.yaml
+```
+
+See [`deploy/examples/cluster_builder_deploy.py`](deploy/examples/cluster_builder_deploy.py).
+
+**On an existing cluster:**
+
+```bash
+kubectl apply -f deploy/k3s/swch-metrics-gateway.yaml
+# or on the k3s server node:
+sudo cp deploy/k3s/swch-metrics-gateway.yaml /var/lib/rancher/k3s/server/manifests/
+```
+
+### 2. Deploy EMS as usual
+
+`swchmonclient.deploy_monitoring(...)` deploys EMS. Within about 30 s the gateway patches the sidecar into
+`emsserver-ems-server`. Check it with:
+
+```bash
+kubectl -n swarm-system get deploy emsserver-ems-server -o jsonpath='{.spec.template.spec.containers[*].name}'
+# ems-server swch-metrics-client
+curl -s http://localhost:8000/status  # (port-forwarded) shows the attacher result
+```
+
+If you prefer not to let the gateway patch EMS, render with `--no-attach-sidecar` and apply
+[`deploy/ems/ems-sidecar-patch.yaml`](deploy/ems/ems-sidecar-patch.yaml) yourself. Alternatively, run the client standalone with
+[`deploy/examples/client-standalone.yaml`](deploy/examples/client-standalone.yaml).
+
+### 3. Open the UI
+
+```bash
+kubectl -n swarm-system port-forward svc/swch-metrics-client-ui 8090:8090
+# → http://localhost:8090   (user: admin, password: UI_PASSWORD from Secret swch-metrics-gateway-auth)
+```
+
+To reach the UI from outside the cluster, render with `--expose-ui nodeport`; it is then on port `30890` of every node.
+
+---
+
+## What EMS gets
+
+### Topology (`ConfigMap swch-metrics-topology`, also `GET /topology`)
+
+| Key | Content |
+|---|---|
+| `GATEWAY_URL` | In-cluster URL of the gateway (`http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000`) |
+| `CLUSTER_ID` / `SWARM_ID` | Stable cluster ID (UID of `kube-system`) and the swarm ID from `swch-cluster-identity` |
+| `topology.json` | The full document: identity, k3s version, API server, nodes (roles, IPs, zone/region/cloud, capacity, readiness, per-node metric URLs) and summary |
+| `endpoints.json` | The metric endpoint catalog: `id`, `path`, `url`, `source`, `available` |
+
+The `swch-metrics-gateway` Service also carries discovery annotations: `swarmchestrate.eu/metrics-api: "true"`,
+`swarmchestrate.eu/topology-configmap`, and `swarmchestrate.eu/openapi`.
+
+### Metrics (STOMP, from the sidecar)
+
+Each sample becomes one STOMP message to `destination` (default `/topic/{metric}`). The format follows the existing
+Swarmchestrate monitoring conventions (see [EMSTopicConsumer](https://github.com/Swarmchestrate/EMSTopicConsumer)):
+
+```text
+destination:      /topic/swch_k3s_node_cpu_pct
+metric:           swch_k3s_node_cpu_pct
+instance:         swch-worker-edge
+timestamp:        1794609789985
+node-id:          <stable client UUID>
+producer-host:    10.42.0.17
+source-node:      swch-worker-edge
+source-endpoint:  http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000/nodes/usage
+cloud / region / zone / swarm-id, label-<name>: …
+
+{"metricValue": 48.1, "level": 1, "timestamp": 1794609789985}
+```
+
+`body_format: json` sends the whole sample instead, and `headers_only` sends an empty body.
+The topology document is published once per change on `/topic/swch_k3s_topology`.
+To match a TOSCA metric model that expects `*_SENSOR` topics, set `destination: /topic/{metric}_SENSOR`.
+
+---
+
+## Configuration
+
+Configuration lives in `client.yaml`. You can edit it in the UI (with forms or the YAML editor) or by changing the ConfigMap.
+Each collector, sink and the gateway can be configured separately, and every string accepts `${ENV}` and `${ENV:-default}` placeholders.
+Placeholders are kept unexpanded when the config is saved, so secrets never end up in a ConfigMap.
+
+```mermaid
+flowchart LR
+  A["/data/client.yaml<br/>(saved in this pod's lifetime)"] -->|"else"| B["ConfigMap swch-metrics-client-config-saved<br/>(saved from the UI earlier)"]
+  B -->|"else"| C["ConfigMap swch-metrics-client-config<br/>(defaults from the k3s manifest)"]
+  C -->|"else"| D["built-in defaults"]
+```
+
+The UI never writes to the defaults ConfigMap. k3s re-applies the auto-deploy manifest whenever it changes or k3s restarts, so a saved configuration has to live elsewhere to survive.
+
+### Collector types
+
+| Type | Gateway endpoint | Emits (before prefix) |
+|---|---|---|
+| `node_usage` | `/nodes/usage` | `node_cpu_millicores`, `node_cpu_pct`, `node_memory_mib`, `node_memory_pct` |
+| `pod_usage` | `/pods/usage` | `pod_cpu_millicores`, `pod_memory_mib` (+ per container) |
+| `pod_overview` | `/pods/overview` | `pod_cpu_pct_of_request/limit`, `pod_memory_pct_of_request/limit`, `pod_restarts`, `pod_running` |
+| `pod_stats` | `/pods/stats` | `pod_network_{rx,tx}_bytes_per_sec`, `pod_memory_working_set_mib`, `pod_ephemeral_storage_used_mib`, `pod_volume_used_{mib,pct}` |
+| `events` | `/events` | `k8s_event` (only new events; labels: `reason`, `kind`, `object`) |
+| `cadvisor` | `/cadvisor` | any cAdvisor metric; counters are converted to `*_per_sec` |
+| `topology` | `/topology` | `cluster_nodes_total/ready`, `node_ready`, plus the full document when it changes |
+| `apiserver_health` | `/apiserver/health` | `apiserver_livez`, `apiserver_readyz` |
+| `prometheus` | `/prometheus/query` | the result of any PromQL query |
+| `http_json` | any path | values mapped from JSON fields (`items_path`, `value_field`, `label_fields`) |
+
+Options shared by every collector: `interval`, `enabled`, `sinks` (subset), `include_namespaces`,
+`exclude_namespaces`, `metrics` (whitelist), `aggregate` (`sum|avg|min|max|count` → `<metric>_<op>` with `instance=cluster`)
+and `metric_prefix`.
+
+### Sink types
+
+| Type | What it does |
+|---|---|
+| `ems_stomp` | Publishes to the EMS broker (`localhost:61610` when running as a sidecar). Reconnects with backoff. |
+| `jsonl` | Appends to a JSON-lines file, with size-based rotation |
+| `webhook` | POSTs each batch as JSON (e.g. to OptimusDB or another ingest endpoint) |
+| `log` | Writes samples to the container log |
+
+The full annotated example is [`deploy/examples/client.full.yaml`](deploy/examples/client.full.yaml).
+
+### Writing your own collector
+
+```python
+# my_org/swch_plugins.py — add "my_org.swch_plugins" to `plugins:` in client.yaml
+from swch_metrics.client.collectors import Collector, register, param
+from swch_metrics.client.model import Sample
+
+@register
+class PendingPods(Collector):
+    type = "pending_pods"
+    title = "Pending pods"
+    description = "Number of Pending pods per namespace."
+    endpoint = "/pods/status"
+    params_schema = {"namespace": param("string", None, "Namespace (empty = all)")}
+    outputs = ["pods_pending"]
+
+    def query(self):
+        return {"namespace": self.params.get("namespace")}
+
+    def transform(self, pods):
+        counts = {}
+        for p in pods:
+            if p["phase"] == "Pending":
+                counts[p["namespace"]] = counts.get(p["namespace"], 0) + 1
+        return [Sample(metric="pods_pending", value=n, labels={"namespace": ns}, instance=ns)
+                for ns, n in counts.items()]
+```
+
+The UI builds its forms from `params_schema`, so a new collector appears there with a working form automatically.
+
+---
+
+## Gateway API
+
+Interactive OpenAPI docs are served at `/docs`. All endpoints except `/health` need `X-API-Key` when `API_KEY` is set.
+
+| Area | Endpoints |
+|---|---|
+| metrics.k8s.io | `/pods/usage`, `/pods/{ns}/{pod}/usage`, `/nodes/usage` |
+| kubelet | `/pods/stats`, `/nodes/{node}/summary`, `/nodes/{node}/cadvisor`, `/cadvisor`, `/nodes/{node}/resource`, `/nodes/{node}/probes`, `/nodes/{node}/kubelet` |
+| core | `/pods/status`, `/pods/overview`, `/events`, `/nodes` |
+| apiserver | `/apiserver/metrics`, `/apiserver/health` |
+| adapters | `/custom-metrics/{path}`, `/external-metrics/{path}` |
+| prometheus | `/prometheus/query`, `/prometheus/query_range`, `/prometheus/targets`, `/prometheus/pods/{preset}` |
+| topology | `/topology`, `/endpoints`, `/capabilities`, `/status` |
+| sidecar | `GET/PUT /client-config/{namespace}` |
+| raw | `/raw?path=/api/...` (read-only) |
+
+### Permissions (RBAC)
+
+The gateway only reads metrics. It can write three things:
+
+- **Topology:** the `swch-metrics-topology` ConfigMap.
+- **Saved client config:** the `swch-metrics-client-config-saved` ConfigMap.
+- **Sidecar patch:** `get` and `patch` on the EMS Deployment only (`resourceNames: [emsserver-ems-server]`).
+
+Both containers run as non-root (UID 10001) with a read-only root filesystem and all capabilities dropped.
+
+---
+
+## Development
+
+```bash
+make install         # pip install -e ".[dev]"
+make test            # unit tests: gateway, topology, attacher, collectors, sinks, engine, UI API
+make manifest        # regenerate deploy/k3s and deploy/ems from scripts/render_manifest.py
+make run-gateway     # gateway against your k3s (KUBECONFIG=/etc/rancher/k3s/k3s.yaml)
+make run-client      # client + UI on http://localhost:8090 using deploy/examples/client.local.yaml
+make image           # one image, two entrypoints: swch-gateway / swch-metrics-client
+make site            # GitHub Pages site (_site/) with the in-browser demo
+```
+
+Repository layout:
+
+```text
+src/swch_metrics/gateway/   FastAPI gateway, topology publisher, EMS sidecar attacher
+src/swch_metrics/client/    engine, collectors/, sinks/, config, UI server, ui/ (static, no CDN needed)
+deploy/k3s/                 k3s auto-deploy manifest (generated)
+deploy/ems/                 manual sidecar patch (generated)
+deploy/examples/            client configs, standalone client, cluster-builder example
+scripts/                    render_manifest.py, build_demo_data.py, build_site.py
+```
+
+### Releases
+
+Pushing a tag `vX.Y.Z` that matches `pyproject.toml` triggers [`release.yml`](.github/workflows/release.yml). It:
+
+1. Builds a multi-arch image (`linux/amd64`, `linux/arm64` for edge nodes) and pushes it to GHCR.
+2. Renders the manifests with that image tag.
+3. Attaches `swch-metrics-gateway.yaml` and `ems-sidecar-patch.yaml` to the GitHub release.
+
+The image name comes from the repository owner, so the workflow works under the org or a personal fork.
+
+---
+
+## Acknowledgement
+
+<img src="https://img.shields.io/badge/-Funded%20by%20the%20European%20Union-003399" alt="EU"> Swarmchestrate is funded by the European Union's
+Horizon Europe programme under grant agreement No. 101135012.
+
+Licensed under the [Apache License 2.0](LICENSE).

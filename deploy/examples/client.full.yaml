@@ -1,0 +1,95 @@
+# Every collector and sink type, with the options you are most likely to change.
+client_name: swch-metrics-client
+default_interval: 30s
+metric_prefix: swch_k3s_
+labels:
+  swarm_id: ${SWARM_ID:-}
+  cluster: ${CLUSTER_NAME:-}
+  cloud: ${CLOUD:-}
+  region: ${REGION:-}
+  zone: ${ZONE:-}
+gateway:
+  url: ${GATEWAY_URL:-http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000}
+  api_key: ${GATEWAY_API_KEY:-}
+  timeout: 10
+ui: {enabled: true, port: 8090, username: admin, password: "${UI_PASSWORD:-}"}
+persist: {mode: gateway, path: /data/client.yaml}
+plugins: []            # e.g. [my_company.swch_collectors] - modules that @register extra collectors/sinks
+
+sinks:
+  - id: ems
+    type: ems_stomp
+    options:
+      host: ${EMS_BROKER_HOST:-localhost}
+      port: 61610
+      username: ${EMS_BROKER_USERNAME:-aaa}
+      password: ${EMS_BROKER_PASSWORD:-111}
+      destination: /topic/{metric}          # e.g. /topic/{metric}_SENSOR to match a TOSCA metric model
+      body_format: ems_event                # {"metricValue","level","timestamp"} | json | headers_only
+      include_labels_as_headers: true
+  - id: archive
+    type: jsonl
+    options: {path: /data/metrics.jsonl, max_mb: 50}
+  - id: optimusdb
+    type: webhook
+    enabled: false
+    options: {url: "http://optimusdb.swarm-system.svc:8089/swarmkb/metrics", headers: {}}
+  - id: log
+    type: log
+    enabled: false
+
+collectors:
+  - id: nodes
+    type: node_usage
+    interval: 15s
+    aggregate: [avg, max]                   # adds swch_k3s_node_cpu_pct_avg / _max (instance=cluster)
+  - id: pods
+    type: pod_usage
+    interval: 15s
+    params: {per_container: false}
+    exclude_namespaces: [kube-system]
+  - id: pod-net-disk
+    type: pod_stats
+    interval: 30s
+    params: {rate: true}
+    metrics: [pod_network_rx_bytes_per_sec, pod_network_tx_bytes_per_sec, pod_volume_used_pct]
+  - id: utilisation
+    type: pod_overview
+    interval: 60s
+    params: {label_selector: ""}
+    metrics: [pod_cpu_pct_of_limit, pod_memory_pct_of_limit, pod_restarts, pod_running]
+  - id: throttling
+    type: cadvisor
+    interval: 60s
+    params: {metric: container_cpu_cfs_throttled_periods_total, rate: true, sum_by_pod: true}
+    exclude_namespaces: [kube-system]
+  - id: oom-and-backoff
+    type: events
+    interval: 30s
+    params: {type: Warning, reasons: [OOMKilling, OOMKilled, BackOff, FailedScheduling, Evicted]}
+    sinks: [ems, archive]
+  - id: apiserver
+    type: apiserver_health
+    interval: 30s
+  - id: topology
+    type: topology
+    interval: 2m
+    params: {publish_document: true}
+  - id: p95-latency
+    type: prometheus
+    enabled: false                          # needs PROMETHEUS_URL on the gateway
+    interval: 60s
+    params:
+      query: histogram_quantile(0.95, sum by (le, pod) (rate(http_request_duration_seconds_bucket[5m])))
+      name: http_p95_seconds
+      instance_label: pod
+  - id: node-pods-capacity
+    type: http_json
+    interval: 5m
+    params:
+      path: /nodes
+      items_path: ""
+      value_field: allocatable.pods
+      metric_name: node_pods_allocatable
+      label_fields: [node]
+      instance_field: node
