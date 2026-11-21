@@ -140,3 +140,17 @@ def test_attacher_copies_config_to_other_namespace(fake_k8s, monkeypatch):
     _ems(fake_k8s, ns="default")
     assert attacher.attach_once(fake_k8s)[0]["status"] == "attached"
     assert "/api/v1/namespaces/default/configmaps/swch-metrics-client-config" in fake_k8s.objects
+
+
+def test_behind_path_prefix(monkeypatch, fake_k8s):
+    """Traefik strips /swch-metrics; the app gets root_path so docs and auth still work."""
+    monkeypatch.setenv("TOPOLOGY_ENABLED", "false")
+    monkeypatch.setenv("ATTACH_EMS_SIDECAR", "false")
+    monkeypatch.setattr(A, "k8s", lambda: fake_k8s)
+    monkeypatch.setattr(A, "API_KEY", "s3cret")
+    with TestClient(A.app, root_path="/swch-metrics") as c:
+        assert c.get("/health").status_code == 200
+        assert "/swch-metrics/openapi.json" in c.get("/docs").text
+        assert c.get("/openapi.json").status_code == 200
+        assert c.get("/pods/usage").status_code == 401
+        assert c.get("/pods/usage", headers={"X-API-Key": "s3cret"}).status_code == 200

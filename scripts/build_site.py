@@ -18,7 +18,8 @@ UI = ROOT / "src/swch_metrics/client/ui"
 OUT = ROOT / "_site"
 
 TITLES = ["Architecture", "What happens on deployment", "Inside the client",
-          "Sidecar attachment lifecycle", "Configuration precedence"]
+          "Sidecar attachment lifecycle", "Configuration precedence",
+          "Many clusters: automatic gateway registration"]
 
 PAGE = """<!DOCTYPE html>
 <html lang="en"><head>
@@ -45,6 +46,7 @@ PAGE = """<!DOCTYPE html>
   <a class="brand" href="./"><img src="https://www.swarmchestrate.eu/wp-content/uploads/2024/04/logo-horizontal.png" alt="Swarmchestrate"
      onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="wordmark" hidden>SWARM<b>CHESTRATE</b></span></a>
   <div class="product"><span class="product-name">k3s Metrics Gateway</span><span class="product-sub">&amp; EMS metrics client</span></div>
+  <div class="partners"><img src="demo/ui/logos/imu.png" alt="IMU · Information Management Unit"><img src="demo/ui/logos/iccs.png" alt="ICCS · ΕΠΙΣΕΥ"></div>
   <div class="pills"><a class="pill" href="{repo}">GitHub</a></div>
 </div></header>
 <section class="hero"><div class="wrap hero-inner" style="padding-bottom:34px"><div>
@@ -59,7 +61,7 @@ PAGE = """<!DOCTYPE html>
 <iframe class="demo-frame" src="demo/?demo" title="Swarmchestrate metrics client demo" loading="lazy"></iframe></section>
 </main>
 <footer class="footer"><div class="wrap footer-inner"><div><strong>Swarmchestrate</strong> — Application-level Swarm-based Orchestration Across the Cloud-to-Edge Continuum
-<div class="muted-light">Funded by the European Union, Horizon Europe grant agreement No. 101135012. Apache-2.0.</div></div><div class="muted-light">{version}</div></div></footer>
+<div class="muted-light">Funded by the European Union, Horizon Europe grant agreement No. 101135012. Apache-2.0.</div></div><div class="footer-right"><div class="footer-logos"><img src="demo/ui/logos/imu-white.png" alt="IMU"><img src="demo/ui/logos/iccs-white.png" alt="ICCS"></div><div class="muted-light">{version}</div></div></div></footer>
 <script type="module">
 import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
 mermaid.initialize({{ startOnLoad: false, theme: "base", securityLevel: "strict",
@@ -94,6 +96,7 @@ def main() -> None:
     shutil.copy(UI / "index.html", demo / "index.html")
     for f in ("app.js", "style.css", "favicon.png", "demo-data.json"):
         shutil.copy(UI / f, demo / "ui" / f)
+    shutil.copytree(UI / "logos", demo / "ui" / "logos")
 
     readme = (ROOT / "README.md").read_text()
     blocks = re.findall(r"```mermaid\n(.*?)```", readme, re.S)

@@ -67,12 +67,37 @@ def main() -> None:
     topo = build_topology(FakeK8s(), caps)
     topo["updated_at"] = "2026-01-01T00:00:00+00:00"  # deterministic file; the demo sets "now" at runtime
     cfg = copy.deepcopy(DEFAULT_CONFIG)
+    cfg["gateways"] = [
+        {"id": "default", "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000", "cluster": "swch-demo"},
+        {"id": "edge-athens-02", "url": "http://172.16.5.40/swch-metrics", "api_key": "${EDGE_KEY:-}",
+         "source": "registered", "cluster": "edge-athens-02", "swarm_id": "swarm-demo-01",
+         "cluster_uid": "8a2e61d4-0c5b-47f2-b1aa-6d3f2e9c7b15", "registered_at": "2026-11-21T08:12:44Z"},
+        {"id": "lab-budapest", "url": "http://192.168.10.50/swch-metrics", "api_key": "${LAB_KEY:-}",
+         "source": "registered", "cluster": "lab-budapest", "swarm_id": "swarm-demo-01",
+         "cluster_uid": "c47b0e93-51f8-4d2a-9e6c-1b8d7a3f0e22", "registered_at": "2026-11-21T09:40:03Z"},
+    ]
+    edge_nodes = [dict(n, name=f"edge-athens-{i}", internal_ip=f"172.16.5.{41 + i}", zone="edge-athens",
+                       region="gr-athens", cloud="edge", arch="arm64")
+                  for i, n in enumerate(topo["nodes"][:2])]
+    lab_nodes = [dict(topo["nodes"][1], name="lab-bud-master", internal_ip="192.168.10.51")]
+    clusters = [
+        {"id": "default", "cluster": "swch-demo", "cluster_uid": topo["cluster_id"], "summary": topo["summary"]},
+        {"id": "edge-athens-02", "cluster": "edge-athens-02", "cluster_uid": "8a2e61d4-0c5b-47f2-b1aa-6d3f2e9c7b15",
+         "summary": {"nodes": 2, "ready": 2, "zones": ["edge-athens"], "clouds": ["edge"]}, "hb_ago": 70,
+         "nodes_list": edge_nodes,
+         "pods": [["optimusddc", "optimusdb1-6d9f7c8b5-k2x7p"], ["optimusddc", "optimusdb2-7c8d9b6f4-x2q4z"],
+                  ["default", "sensor-gw-5b7d"]]},
+        {"id": "lab-budapest", "cluster": "lab-budapest", "cluster_uid": "c47b0e93-51f8-4d2a-9e6c-1b8d7a3f0e22",
+         "summary": {"nodes": 1, "ready": 1, "zones": ["sztaki-cloud"], "clouds": ["openstack"]}, "hb_ago": 200,
+         "nodes_list": lab_nodes, "pods": [["default", "lib-optimiser-77c"], ["default", "resource-agent-5b2"]]},
+    ]
     data = {
         "types": describe(),
         "sink_types": describe_sinks(),
         "config": cfg,
         "labels": {"swarm_id": "swarm-demo-01", "cluster": "swch-demo"},
         "topology": topo,
+        "clusters": clusters,
     }
     out = ROOT / "src/swch_metrics/client/ui/demo-data.json"
     out.write_text(json.dumps(data, indent=1))

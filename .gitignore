@@ -7,3 +7,11 @@ build/
 .pytest_cache/
 _site/
 .env
+
+# rendered per-host deployments carry the API key / UI password: never commit them
+host[AB]-*.yaml
+host[AB]-*.zip
+hostA-optimusdb.zip
+hostB-ems.zip
+*-secret*.yaml
+backup/

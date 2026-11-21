@@ -7,9 +7,10 @@ default_interval: 15s
 metric_prefix: swch_k3s_
 labels:
   swarm_id: ${SWARM_ID:-local-dev}
-gateway:
-  url: http://localhost:8000
-  api_key: ${GATEWAY_API_KEY:-}
+gateways:
+  - id: local
+    url: http://localhost:8000
+    api_key: ${GATEWAY_API_KEY:-}
 ui:
   port: 8090
 persist:

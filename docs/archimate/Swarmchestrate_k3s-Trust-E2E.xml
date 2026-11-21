@@ -1,0 +1,741 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<model xmlns="http://www.opengroup.org/xsd/archimate/3.0/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.opengroup.org/xsd/archimate/3.0/ http://www.opengroup.org/xsd/archimate/3.1/archimate3_Diagram.xsd" identifier="id-swch-k3s-trust">
+  <name xml:lang="en">Swarmchestrate · k3s metrics → EMS → OptimusDB trust evidence</name>
+  <documentation xml:lang="en">End-to-end architecture of the k3s Metrics Gateway (host A), the EMS metrics sidecar (host B) and the persistence of trust attributes A1 Availability and A3 Operational stability in OptimusDB (dstype kbtrust). Horizon Europe Swarmchestrate, Grant 101135012.</documentation>
+  <elements>
+    <element identifier="id-drv" xsi:type="Driver">
+      <name xml:lang="en">Trustworthy swarm orchestration across the Cloud-to-Edge continuum</name>
+    </element>
+    <element identifier="id-goal" xsi:type="Goal">
+      <name xml:lang="en">Trust-aware placement and coordinator election in Swarmchestrate</name>
+    </element>
+    <element identifier="id-con" xsi:type="Constraint">
+      <name xml:lang="en">Hosts expose only 22 / 80 / 443: all traffic goes through Traefik on port 80</name>
+      <documentation xml:lang="en">Host B (EMS) answers on 22, 80 and 443 only. The gateway is pulled by host B over HTTP :80, and OptimusDB is written over HTTP :80. No new port is opened.</documentation>
+    </element>
+    <element identifier="id-assess" xsi:type="Assessment">
+      <name xml:lang="en">k3s out of the box: A1 Availability and A3 Operational stability are measurable now; the other attributes are partial (raw inputs) or need extra tooling</name>
+      <documentation xml:lang="en">From the Swarmchestrate Trust Attributes Catalogue, column &#x27;Out of the box (k3s Metrics Gateway)&#x27;: Yes: A3, B3. Partial: A1, A2, A4, B2, B4, B5, C2, C4, E2, G1. No: the rest. Persisted as trust evidence: A1 and A3.</documentation>
+    </element>
+    <element identifier="id-req_a1" xsi:type="Requirement">
+      <name xml:lang="en">A1 Availability ≥ 99.5 % in 30 days</name>
+      <documentation xml:lang="en">Catalogue A1. Available time / scheduled time; successful checks / expected checks. Role in TMS: conditional or calculable. Missing checks are not counted as available (see evidence.coverage).</documentation>
+      <properties>
+        <property propertyDefinitionRef="propid-1"><value xml:lang="en">A1</value></property>
+        <property propertyDefinitionRef="propid-8"><value xml:lang="en">availability &gt;= 0.995</value></property>
+        <property propertyDefinitionRef="propid-9"><value xml:lang="en">30d</value></property>
+        <property propertyDefinitionRef="propid-5"><value xml:lang="en">swch_k3s_pod_running, swch_k3s_node_ready, swch_k3s_apiserver_readyz</value></property>
+      </properties>
+    </element>
+    <element identifier="id-req_a3" xsi:type="Requirement">
+      <name xml:lang="en">A3 Operational stability ≤ 2 unplanned restarts in 7 days</name>
+      <documentation xml:lang="en">Catalogue A3. Unexpected restarts, crashes and container failure events. Role in TMS: calculable. Planned replacements (rollouts) create a new pod and are not counted.</documentation>
+      <properties>
+        <property propertyDefinitionRef="propid-1"><value xml:lang="en">A3</value></property>
+        <property propertyDefinitionRef="propid-8"><value xml:lang="en">unplanned_events &lt;= 2</value></property>
+        <property propertyDefinitionRef="propid-9"><value xml:lang="en">7d</value></property>
+        <property propertyDefinitionRef="propid-5"><value xml:lang="en">swch_k3s_pod_restarts, ready-&gt;not-ready transitions, swch_k3s_k8s_event (Warning)</value></property>
+      </properties>
+    </element>
+    <element identifier="id-br_tms" xsi:type="BusinessRole">
+      <name xml:lang="en">Trust Management System (TMS)</name>
+    </element>
+    <element identifier="id-bp_eval" xsi:type="BusinessProcess">
+      <name xml:lang="en">Trust evaluation: trust scores, Trust VCs, coordinator election</name>
+    </element>
+    <element identifier="id-bo_cat" xsi:type="BusinessObject">
+      <name xml:lang="en">Swarmchestrate Trust Attributes Catalogue (A1 to G4)</name>
+    </element>
+    <element identifier="id-tms" xsi:type="ApplicationComponent">
+      <name xml:lang="en">optimusTrust / TMS (optimusPy client)</name>
+      <documentation xml:lang="en">Reads trust evidence from kbtrust (crudget by criteria) and computes trust scores and VCs.</documentation>
+      <properties>
+        <property propertyDefinitionRef="propid-6"><value xml:lang="en">github.com/georgeGeorgakakos/optimusTrust</value></property>
+      </properties>
+    </element>
+    <element identifier="id-odb" xsi:type="ApplicationComponent">
+      <name xml:lang="en">OptimusDB agents optimusdb1, optimusdb2, optimusdb3 (ns optimusddc)</name>
+      <documentation xml:lang="en">Decentralised knowledge base (OrbitDB/IPFS, CRDT replication). Coordinator plus 2 followers.</documentation>
+    </element>
+    <element identifier="id-odb_api" xsi:type="ApplicationInterface">
+      <name xml:lang="en">Command API  POST /optimusdb1/swarmkb/command</name>
+      <documentation xml:lang="en">crudput / crudget / crudupdate / cruddelete with dstype and criteria. Reached through Traefik :80.</documentation>
+      <properties>
+        <property propertyDefinitionRef="propid-3"><value xml:lang="en">http://193.225.250.240/optimusdb1/swarmkb/command</value></property>
+      </properties>
+    </element>
+    <element identifier="id-do_kbtrust" xsi:type="DataObject">
+      <name xml:lang="en">kbtrust: trust_evidence (A1, A3) · trust_evidence_history · monitoring_snapshot</name>
+      <documentation xml:lang="en">_id trust:&lt;cluster&gt;:&lt;kind&gt;:&lt;ns&gt;/&lt;name&gt;:&lt;A1|A3&gt; (upsert every 60 s); history copy per hour; monitoring:&lt;cluster&gt;:&lt;kind&gt;:&lt;ns&gt;/&lt;name&gt; in the optimusTrust monitoring shape.</documentation>
+      <properties>
+        <property propertyDefinitionRef="propid-2"><value xml:lang="en">kbtrust</value></property>
+      </properties>
+    </element>
+    <element identifier="id-do_emsev" xsi:type="DataObject">
+      <name xml:lang="en">ems_events (SQLite): EMS messages from /topic/&gt;</name>
+    </element>
+    <element identifier="id-gw" xsi:type="ApplicationComponent">
+      <name xml:lang="en">swch-metrics-gateway (ns swarm-system) :8000</name>
+      <documentation xml:lang="en">FastAPI gateway over metrics-server, kubelet (Summary, cAdvisor, resource, probes), core API state, events and API-server metrics/health. Publishes the topology ConfigMap.</documentation>
+    </element>
+    <element identifier="id-gw_fn" xsi:type="ApplicationFunction">
+      <name xml:lang="en">Read and normalise k3s metrics and state (pods, nodes, events, control plane)</name>
+    </element>
+    <element identifier="id-gw_api" xsi:type="ApplicationInterface">
+      <name xml:lang="en">Gateway REST API  /swch-metrics  (X-API-Key)</name>
+      <documentation xml:lang="en">/pods/overview, /topology, /apiserver/health, /events, /nodes/usage, /pods/usage ...</documentation>
+      <properties>
+        <property propertyDefinitionRef="propid-3"><value xml:lang="en">http://193.225.250.240/swch-metrics</value></property>
+      </properties>
+    </element>
+    <element identifier="id-node_a" xsi:type="Node">
+      <name xml:lang="en">Host A · 193.225.250.240 · epm-server</name>
+    </element>
+    <element identifier="id-k3s_a" xsi:type="SystemSoftware">
+      <name xml:lang="en">k3s v1.33.4: kube-apiserver :6443 · kubelet / cAdvisor · metrics-server</name>
+    </element>
+    <element identifier="id-traefik_a" xsi:type="SystemSoftware">
+      <name xml:lang="en">Traefik ingress :80  (/swch-metrics, /optimusdb1)</name>
+    </element>
+    <element identifier="id-autossh" xsi:type="SystemSoftware">
+      <name xml:lang="en">autossh tunnel to the EMS broker (SSH :22)</name>
+    </element>
+    <element identifier="id-art_gw" xsi:type="Artifact">
+      <name xml:lang="en">image k3s-metrics-gateway:0.2.0 (gateway)</name>
+    </element>
+    <element identifier="id-ems" xsi:type="ApplicationComponent">
+      <name xml:lang="en">EMS server  emsserver-ems-server  (ns default)</name>
+    </element>
+    <element identifier="id-broker" xsi:type="ApplicationInterface">
+      <name xml:lang="en">ActiveMQ broker  STOMP localhost:61610</name>
+    </element>
+    <element identifier="id-do_topics" xsi:type="DataObject">
+      <name xml:lang="en">EMS topics /topic/swch_k3s_*  {metricValue, level, timestamp}</name>
+    </element>
+    <element identifier="id-do_trustin" xsi:type="DataObject">
+      <name xml:lang="en">Trust inputs. A1: pod_running · node_ready · apiserver_readyz.  A3: pod_restarts · ready→not-ready · k8s_event Warnings</name>
+      <documentation xml:lang="en">All swch_k3s_* samples that are already collected for EMS. Warning reasons used as A3 evidence: BackOff, OOMKilling, Unhealthy, Failed, Evicted, Rebooted, NodeNotReady.</documentation>
+    </element>
+    <element identifier="id-side" xsi:type="ApplicationComponent">
+      <name xml:lang="en">swch-metrics-client  (EMS sidecar)  :8090</name>
+    </element>
+    <element identifier="id-coll" xsi:type="ApplicationFunction">
+      <name xml:lang="en">Collectors: pod_overview 60 s · topology 2 min · control-plane 30 s · events 60 s · node / pod usage 30 s</name>
+    </element>
+    <element identifier="id-ems_sink" xsi:type="ApplicationFunction">
+      <name xml:lang="en">EMS STOMP sink</name>
+    </element>
+    <element identifier="id-trust_sink" xsi:type="ApplicationFunction">
+      <name xml:lang="en">OptimusDB trust sink: A1 / A3 evaluator, rolling 30 d / 7 d, flush every 60 s</name>
+      <documentation xml:lang="en">optimusdb_trust sink (v0.2.0). Hourly buckets per subject (pod, node, control plane). Writes with crudput into dstype kbtrust.</documentation>
+      <properties>
+        <property propertyDefinitionRef="propid-7"><value xml:lang="en">optimusdb_trust</value></property>
+        <property propertyDefinitionRef="propid-4"><value xml:lang="en">60s</value></property>
+      </properties>
+    </element>
+    <element identifier="id-do_state" xsi:type="DataObject">
+      <name xml:lang="en">trust-state.json (hourly buckets)</name>
+    </element>
+    <element identifier="id-ui" xsi:type="ApplicationInterface">
+      <name xml:lang="en">UI and API  /swch-metrics-ui  (admin) · /api/trust</name>
+    </element>
+    <element identifier="id-node_b" xsi:type="Node">
+      <name xml:lang="en">Host B · 193.225.251.34 · swch-monitoring-testbed-1 / -2</name>
+    </element>
+    <element identifier="id-k3s_b" xsi:type="SystemSoftware">
+      <name xml:lang="en">k3s (EMS in namespace default)</name>
+    </element>
+    <element identifier="id-traefik_b" xsi:type="SystemSoftware">
+      <name xml:lang="en">Traefik ingress :80  (/swch-metrics-ui)</name>
+    </element>
+    <element identifier="id-art_side" xsi:type="Artifact">
+      <name xml:lang="en">image k3s-metrics-gateway:0.2.0 (sidecar)</name>
+    </element>
+    <element identifier="id-art_pvc" xsi:type="Artifact">
+      <name xml:lang="en">PVC swch-metrics-client-data: client.yaml · trust-state.json</name>
+    </element>
+    <element identifier="id-net" xsi:type="CommunicationNetwork">
+      <name xml:lang="en">ICCS network · HTTP :80 (host B → host A) · SSH :22 (autossh)</name>
+    </element>
+    <element identifier="id-grp_a" xsi:type="Grouping">
+      <name xml:lang="en">Host A · k3s + OptimusDB  (193.225.250.240)</name>
+    </element>
+    <element identifier="id-grp_b" xsi:type="Grouping">
+      <name xml:lang="en">Host B · EMS  (193.225.251.34)</name>
+    </element>
+    <element identifier="id-s_phase" xsi:type="DataObject">
+      <name xml:lang="en">Pod status.phase (core API)</name>
+    </element>
+    <element identifier="id-s_restart" xsi:type="DataObject">
+      <name xml:lang="en">containerStatuses[].restartCount</name>
+    </element>
+    <element identifier="id-s_ready" xsi:type="DataObject">
+      <name xml:lang="en">Node condition Ready</name>
+    </element>
+    <element identifier="id-s_readyz" xsi:type="DataObject">
+      <name xml:lang="en">kube-apiserver /readyz</name>
+    </element>
+    <element identifier="id-s_events" xsi:type="DataObject">
+      <name xml:lang="en">Events  type=Warning</name>
+    </element>
+    <element identifier="id-ep_over" xsi:type="ApplicationInterface">
+      <name xml:lang="en">GET /pods/overview</name>
+    </element>
+    <element identifier="id-ep_topo" xsi:type="ApplicationInterface">
+      <name xml:lang="en">GET /topology</name>
+    </element>
+    <element identifier="id-ep_health" xsi:type="ApplicationInterface">
+      <name xml:lang="en">GET /apiserver/health</name>
+    </element>
+    <element identifier="id-ep_events" xsi:type="ApplicationInterface">
+      <name xml:lang="en">GET /events?type=Warning</name>
+    </element>
+    <element identifier="id-m_run" xsi:type="DataObject">
+      <name xml:lang="en">swch_k3s_pod_running  (1 = Running)</name>
+    </element>
+    <element identifier="id-m_rst" xsi:type="DataObject">
+      <name xml:lang="en">swch_k3s_pod_restarts  (counter)</name>
+    </element>
+    <element identifier="id-m_nready" xsi:type="DataObject">
+      <name xml:lang="en">swch_k3s_node_ready  (1 / 0)</name>
+    </element>
+    <element identifier="id-m_readyz" xsi:type="DataObject">
+      <name xml:lang="en">swch_k3s_apiserver_readyz  (1 / 0)</name>
+    </element>
+    <element identifier="id-m_event" xsi:type="DataObject">
+      <name xml:lang="en">swch_k3s_k8s_event  (reason, object)</name>
+    </element>
+    <element identifier="id-f_a1" xsi:type="ApplicationFunction">
+      <name xml:lang="en">Evaluate A1 Availability = available checks / observed checks over 30 d</name>
+      <documentation xml:lang="en">Per pod (pod_running), node (node_ready) and control plane (apiserver_readyz). score = value. slo_met = value &gt;= availability_slo (0.995). evidence: checks_ok, checks_total, coverage.</documentation>
+    </element>
+    <element identifier="id-f_a3" xsi:type="ApplicationFunction">
+      <name xml:lang="en">Evaluate A3 Operational stability = unplanned restarts / outages over 7 d</name>
+      <documentation xml:lang="en">Pods: increase of the container restart counter. Nodes and control plane: ready→not-ready transitions. Warning events are attached as evidence. score = max(0, 1 - n / (max + 1)); slo_met = n &lt;= 2.</documentation>
+    </element>
+    <element identifier="id-d_a1" xsi:type="DataObject">
+      <name xml:lang="en">trust_evidence A1  {value, score, slo_met, evidence.checks, coverage, subject_did}</name>
+    </element>
+    <element identifier="id-d_a3" xsi:type="DataObject">
+      <name xml:lang="en">trust_evidence A3  {value, score, slo_met, evidence.unplanned_events, warnings}</name>
+    </element>
+    <element identifier="id-d_hist" xsi:type="DataObject">
+      <name xml:lang="en">trust_evidence_history  (hourly, append-only)</name>
+    </element>
+    <element identifier="id-d_mon" xsi:type="DataObject">
+      <name xml:lang="en">monitoring_snapshot  {device_did, monitoring.uptime, unplanned_restarts}</name>
+    </element>
+  </elements>
+  <relationships>
+    <relationship identifier="id-r_drv_goal" source="id-drv" target="id-goal" xsi:type="Influence"></relationship>
+    <relationship identifier="id-r_a1_goal" source="id-req_a1" target="id-goal" xsi:type="Realization"></relationship>
+    <relationship identifier="id-r_a3_goal" source="id-req_a3" target="id-goal" xsi:type="Realization"></relationship>
+    <relationship identifier="id-r_con_net" source="id-con" target="id-net" xsi:type="Association"></relationship>
+    <relationship identifier="id-r_cat_assess" source="id-bo_cat" target="id-assess" xsi:type="Association"></relationship>
+    <relationship identifier="id-r_cat_a1" source="id-bo_cat" target="id-req_a1" xsi:type="Association"></relationship>
+    <relationship identifier="id-r_cat_a3" source="id-bo_cat" target="id-req_a3" xsi:type="Association"></relationship>
+    <relationship identifier="id-r_br_bp" source="id-br_tms" target="id-bp_eval" xsi:type="Assignment"></relationship>
+    <relationship identifier="id-r_bp_cat" source="id-bp_eval" target="id-bo_cat" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_tms_bp" source="id-tms" target="id-bp_eval" xsi:type="Serving"></relationship>
+    <relationship identifier="id-r_tms_kb" source="id-tms" target="id-do_kbtrust" xsi:type="Access" accessType="Read"><name xml:lang="en">crudget by criteria</name></relationship>
+    <relationship identifier="id-r_odbapi_tms" source="id-odb_api" target="id-tms" xsi:type="Serving"><name xml:lang="en">crudget kbtrust</name></relationship>
+    <relationship identifier="id-r_odb_api" source="id-odb" target="id-odb_api" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_odb_kb" source="id-odb" target="id-do_kbtrust" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_odb_emsev" source="id-odb" target="id-do_emsev" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_gw_api" source="id-gw" target="id-gw_api" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_gw_fn" source="id-gw" target="id-gw_fn" xsi:type="Assignment"></relationship>
+    <relationship identifier="id-r_k3s_gwfn" source="id-k3s_a" target="id-gw_fn" xsi:type="Flow"><name xml:lang="en">metrics and state · HTTPS :6443</name></relationship>
+    <relationship identifier="id-r_tra_gwapi" source="id-traefik_a" target="id-gw_api" xsi:type="Serving"><name xml:lang="en">/swch-metrics</name></relationship>
+    <relationship identifier="id-r_tra_odbapi" source="id-traefik_a" target="id-odb_api" xsi:type="Serving"><name xml:lang="en">/optimusdb1</name></relationship>
+    <relationship identifier="id-r_node_a_k3s" source="id-node_a" target="id-k3s_a" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_node_a_tra" source="id-node_a" target="id-traefik_a" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_node_a_ssh" source="id-node_a" target="id-autossh" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_node_a_art" source="id-node_a" target="id-art_gw" xsi:type="Assignment"></relationship>
+    <relationship identifier="id-r_art_gw" source="id-art_gw" target="id-gw" xsi:type="Realization"></relationship>
+    <relationship identifier="id-r_ssh_odb" source="id-autossh" target="id-odb" xsi:type="Serving"></relationship>
+    <relationship identifier="id-r_gwapi_coll" source="id-gw_api" target="id-coll" xsi:type="Flow"><name xml:lang="en">pull · HTTP :80 /swch-metrics · X-API-Key</name></relationship>
+    <relationship identifier="id-r_side_coll" source="id-side" target="id-coll" xsi:type="Assignment"></relationship>
+    <relationship identifier="id-r_side_ems" source="id-side" target="id-ems_sink" xsi:type="Assignment"></relationship>
+    <relationship identifier="id-r_side_trust" source="id-side" target="id-trust_sink" xsi:type="Assignment"></relationship>
+    <relationship identifier="id-r_side_ui" source="id-side" target="id-ui" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_coll_ems" source="id-coll" target="id-ems_sink" xsi:type="Flow"><name xml:lang="en">samples</name></relationship>
+    <relationship identifier="id-r_coll_trust" source="id-coll" target="id-trust_sink" xsi:type="Flow"><name xml:lang="en">samples</name></relationship>
+    <relationship identifier="id-r_coll_in" source="id-coll" target="id-do_trustin" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_trust_in" source="id-trust_sink" target="id-do_trustin" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_trust_state" source="id-trust_sink" target="id-do_state" xsi:type="Access" accessType="ReadWrite"></relationship>
+    <relationship identifier="id-r_trust_odb" source="id-trust_sink" target="id-odb_api" xsi:type="Flow"><name xml:lang="en">crudput kbtrust · HTTP :80 · every 60 s</name></relationship>
+    <relationship identifier="id-r_trust_kb" source="id-trust_sink" target="id-do_kbtrust" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_ems_sink_broker" source="id-ems_sink" target="id-broker" xsi:type="Flow"><name xml:lang="en">STOMP localhost:61610</name></relationship>
+    <relationship identifier="id-r_ems_broker" source="id-ems" target="id-broker" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_ems_topics" source="id-ems" target="id-do_topics" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_broker_odb" source="id-broker" target="id-odb" xsi:type="Flow"><name xml:lang="en">/topic/&gt; · autossh tunnel</name></relationship>
+    <relationship identifier="id-r_trin_a1" source="id-do_trustin" target="id-req_a1" xsi:type="Association"><name xml:lang="en">evidence for</name></relationship>
+    <relationship identifier="id-r_trin_a3" source="id-do_trustin" target="id-req_a3" xsi:type="Association"><name xml:lang="en">evidence for</name></relationship>
+    <relationship identifier="id-r_kb_a1" source="id-do_kbtrust" target="id-req_a1" xsi:type="Realization"></relationship>
+    <relationship identifier="id-r_kb_a3" source="id-do_kbtrust" target="id-req_a3" xsi:type="Realization"></relationship>
+    <relationship identifier="id-r_tra_ui" source="id-traefik_b" target="id-ui" xsi:type="Serving"><name xml:lang="en">/swch-metrics-ui</name></relationship>
+    <relationship identifier="id-r_node_b_k3s" source="id-node_b" target="id-k3s_b" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_node_b_tra" source="id-node_b" target="id-traefik_b" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_node_b_art" source="id-node_b" target="id-art_side" xsi:type="Assignment"></relationship>
+    <relationship identifier="id-r_node_b_pvc" source="id-node_b" target="id-art_pvc" xsi:type="Assignment"></relationship>
+    <relationship identifier="id-r_art_side" source="id-art_side" target="id-side" xsi:type="Realization"></relationship>
+    <relationship identifier="id-r_pvc_state" source="id-art_pvc" target="id-do_state" xsi:type="Realization"></relationship>
+    <relationship identifier="id-r_k3s_b_ems" source="id-k3s_b" target="id-ems" xsi:type="Serving"></relationship>
+    <relationship identifier="id-r_k3s_b_side" source="id-k3s_b" target="id-side" xsi:type="Serving"></relationship>
+    <relationship identifier="id-r_neta" source="id-node_a" target="id-net" xsi:type="Association"></relationship>
+    <relationship identifier="id-r_netb" source="id-node_b" target="id-net" xsi:type="Association"></relationship>
+    <relationship identifier="id-r_grp_a_odb" source="id-grp_a" target="id-odb" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_grp_a_gw" source="id-grp_a" target="id-gw" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_grp_a_node_a" source="id-grp_a" target="id-node_a" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_grp_b_ems" source="id-grp_b" target="id-ems" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_grp_b_side" source="id-grp_b" target="id-side" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_grp_b_node_b" source="id-grp_b" target="id-node_b" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_grp_b_do_trustin" source="id-grp_b" target="id-do_trustin" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_gw_ep_over" source="id-gw" target="id-ep_over" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_ep_over_coll" source="id-ep_over" target="id-coll" xsi:type="Serving"></relationship>
+    <relationship identifier="id-r_ep_over_s_phase" source="id-ep_over" target="id-s_phase" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_ep_over_s_restart" source="id-ep_over" target="id-s_restart" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_gw_ep_topo" source="id-gw" target="id-ep_topo" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_ep_topo_coll" source="id-ep_topo" target="id-coll" xsi:type="Serving"></relationship>
+    <relationship identifier="id-r_ep_topo_s_ready" source="id-ep_topo" target="id-s_ready" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_gw_ep_health" source="id-gw" target="id-ep_health" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_ep_health_coll" source="id-ep_health" target="id-coll" xsi:type="Serving"></relationship>
+    <relationship identifier="id-r_ep_health_s_readyz" source="id-ep_health" target="id-s_readyz" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_gw_ep_events" source="id-gw" target="id-ep_events" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_ep_events_coll" source="id-ep_events" target="id-coll" xsi:type="Serving"></relationship>
+    <relationship identifier="id-r_ep_events_s_events" source="id-ep_events" target="id-s_events" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_coll_m_run" source="id-coll" target="id-m_run" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_m_run_in" source="id-do_trustin" target="id-m_run" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_coll_m_rst" source="id-coll" target="id-m_rst" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_m_rst_in" source="id-do_trustin" target="id-m_rst" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_coll_m_nready" source="id-coll" target="id-m_nready" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_m_nready_in" source="id-do_trustin" target="id-m_nready" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_coll_m_readyz" source="id-coll" target="id-m_readyz" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_m_readyz_in" source="id-do_trustin" target="id-m_readyz" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_coll_m_event" source="id-coll" target="id-m_event" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_m_event_in" source="id-do_trustin" target="id-m_event" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_trust_f_a1" source="id-trust_sink" target="id-f_a1" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_f_a1_m_run" source="id-f_a1" target="id-m_run" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_f_a1_m_nready" source="id-f_a1" target="id-m_nready" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_f_a1_m_readyz" source="id-f_a1" target="id-m_readyz" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_trust_f_a3" source="id-trust_sink" target="id-f_a3" xsi:type="Composition"></relationship>
+    <relationship identifier="id-r_f_a3_m_rst" source="id-f_a3" target="id-m_rst" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_f_a3_m_nready" source="id-f_a3" target="id-m_nready" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_f_a3_m_readyz" source="id-f_a3" target="id-m_readyz" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_f_a3_m_event" source="id-f_a3" target="id-m_event" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_fa1_d" source="id-f_a1" target="id-d_a1" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_fa3_d" source="id-f_a3" target="id-d_a3" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_trust_hist" source="id-trust_sink" target="id-d_hist" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_trust_mon" source="id-trust_sink" target="id-d_mon" xsi:type="Access" accessType="Write"></relationship>
+    <relationship identifier="id-r_kb_d_a1" source="id-do_kbtrust" target="id-d_a1" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_kb_d_a3" source="id-do_kbtrust" target="id-d_a3" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_kb_d_hist" source="id-do_kbtrust" target="id-d_hist" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_kb_d_mon" source="id-do_kbtrust" target="id-d_mon" xsi:type="Aggregation"></relationship>
+    <relationship identifier="id-r_da1_req" source="id-d_a1" target="id-req_a1" xsi:type="Realization"></relationship>
+    <relationship identifier="id-r_da3_req" source="id-d_a3" target="id-req_a3" xsi:type="Realization"></relationship>
+    <relationship identifier="id-r_tms_da1" source="id-tms" target="id-d_a1" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_tms_da3" source="id-tms" target="id-d_a3" xsi:type="Access" accessType="Read"></relationship>
+    <relationship identifier="id-r_tms_mon" source="id-tms" target="id-d_mon" xsi:type="Access" accessType="Read"></relationship>
+  </relationships>
+  <organizations>
+    <item><label xml:lang="en">Motivation</label>
+      <item identifierRef="id-drv"/>
+      <item identifierRef="id-goal"/>
+      <item identifierRef="id-con"/>
+      <item identifierRef="id-assess"/>
+      <item identifierRef="id-req_a1"/>
+      <item identifierRef="id-req_a3"/>
+    </item>
+    <item><label xml:lang="en">Business</label>
+      <item identifierRef="id-br_tms"/>
+      <item identifierRef="id-bp_eval"/>
+      <item identifierRef="id-bo_cat"/>
+    </item>
+    <item><label xml:lang="en">Application</label>
+      <item identifierRef="id-tms"/>
+      <item identifierRef="id-odb"/>
+      <item identifierRef="id-odb_api"/>
+      <item identifierRef="id-do_kbtrust"/>
+      <item identifierRef="id-do_emsev"/>
+      <item identifierRef="id-gw"/>
+      <item identifierRef="id-gw_fn"/>
+      <item identifierRef="id-gw_api"/>
+      <item identifierRef="id-ems"/>
+      <item identifierRef="id-broker"/>
+      <item identifierRef="id-do_topics"/>
+      <item identifierRef="id-do_trustin"/>
+      <item identifierRef="id-side"/>
+      <item identifierRef="id-coll"/>
+      <item identifierRef="id-ems_sink"/>
+      <item identifierRef="id-trust_sink"/>
+      <item identifierRef="id-do_state"/>
+      <item identifierRef="id-ui"/>
+      <item identifierRef="id-s_phase"/>
+      <item identifierRef="id-s_restart"/>
+      <item identifierRef="id-s_ready"/>
+      <item identifierRef="id-s_readyz"/>
+      <item identifierRef="id-s_events"/>
+      <item identifierRef="id-ep_over"/>
+      <item identifierRef="id-ep_topo"/>
+      <item identifierRef="id-ep_health"/>
+      <item identifierRef="id-ep_events"/>
+      <item identifierRef="id-m_run"/>
+      <item identifierRef="id-m_rst"/>
+      <item identifierRef="id-m_nready"/>
+      <item identifierRef="id-m_readyz"/>
+      <item identifierRef="id-m_event"/>
+      <item identifierRef="id-f_a1"/>
+      <item identifierRef="id-f_a3"/>
+      <item identifierRef="id-d_a1"/>
+      <item identifierRef="id-d_a3"/>
+      <item identifierRef="id-d_hist"/>
+      <item identifierRef="id-d_mon"/>
+    </item>
+    <item><label xml:lang="en">Technology &amp; Physical</label>
+      <item identifierRef="id-node_a"/>
+      <item identifierRef="id-k3s_a"/>
+      <item identifierRef="id-traefik_a"/>
+      <item identifierRef="id-autossh"/>
+      <item identifierRef="id-art_gw"/>
+      <item identifierRef="id-node_b"/>
+      <item identifierRef="id-k3s_b"/>
+      <item identifierRef="id-traefik_b"/>
+      <item identifierRef="id-art_side"/>
+      <item identifierRef="id-art_pvc"/>
+      <item identifierRef="id-net"/>
+    </item>
+    <item><label xml:lang="en">Other</label>
+      <item identifierRef="id-grp_a"/>
+      <item identifierRef="id-grp_b"/>
+    </item>
+    <item><label xml:lang="en">Relations</label>
+      <item identifierRef="id-r_drv_goal"/>
+      <item identifierRef="id-r_a1_goal"/>
+      <item identifierRef="id-r_a3_goal"/>
+      <item identifierRef="id-r_con_net"/>
+      <item identifierRef="id-r_cat_assess"/>
+      <item identifierRef="id-r_cat_a1"/>
+      <item identifierRef="id-r_cat_a3"/>
+      <item identifierRef="id-r_br_bp"/>
+      <item identifierRef="id-r_bp_cat"/>
+      <item identifierRef="id-r_tms_bp"/>
+      <item identifierRef="id-r_tms_kb"/>
+      <item identifierRef="id-r_odbapi_tms"/>
+      <item identifierRef="id-r_odb_api"/>
+      <item identifierRef="id-r_odb_kb"/>
+      <item identifierRef="id-r_odb_emsev"/>
+      <item identifierRef="id-r_gw_api"/>
+      <item identifierRef="id-r_gw_fn"/>
+      <item identifierRef="id-r_k3s_gwfn"/>
+      <item identifierRef="id-r_tra_gwapi"/>
+      <item identifierRef="id-r_tra_odbapi"/>
+      <item identifierRef="id-r_node_a_k3s"/>
+      <item identifierRef="id-r_node_a_tra"/>
+      <item identifierRef="id-r_node_a_ssh"/>
+      <item identifierRef="id-r_node_a_art"/>
+      <item identifierRef="id-r_art_gw"/>
+      <item identifierRef="id-r_ssh_odb"/>
+      <item identifierRef="id-r_gwapi_coll"/>
+      <item identifierRef="id-r_side_coll"/>
+      <item identifierRef="id-r_side_ems"/>
+      <item identifierRef="id-r_side_trust"/>
+      <item identifierRef="id-r_side_ui"/>
+      <item identifierRef="id-r_coll_ems"/>
+      <item identifierRef="id-r_coll_trust"/>
+      <item identifierRef="id-r_coll_in"/>
+      <item identifierRef="id-r_trust_in"/>
+      <item identifierRef="id-r_trust_state"/>
+      <item identifierRef="id-r_trust_odb"/>
+      <item identifierRef="id-r_trust_kb"/>
+      <item identifierRef="id-r_ems_sink_broker"/>
+      <item identifierRef="id-r_ems_broker"/>
+      <item identifierRef="id-r_ems_topics"/>
+      <item identifierRef="id-r_broker_odb"/>
+      <item identifierRef="id-r_trin_a1"/>
+      <item identifierRef="id-r_trin_a3"/>
+      <item identifierRef="id-r_kb_a1"/>
+      <item identifierRef="id-r_kb_a3"/>
+      <item identifierRef="id-r_tra_ui"/>
+      <item identifierRef="id-r_node_b_k3s"/>
+      <item identifierRef="id-r_node_b_tra"/>
+      <item identifierRef="id-r_node_b_art"/>
+      <item identifierRef="id-r_node_b_pvc"/>
+      <item identifierRef="id-r_art_side"/>
+      <item identifierRef="id-r_pvc_state"/>
+      <item identifierRef="id-r_k3s_b_ems"/>
+      <item identifierRef="id-r_k3s_b_side"/>
+      <item identifierRef="id-r_neta"/>
+      <item identifierRef="id-r_netb"/>
+      <item identifierRef="id-r_grp_a_odb"/>
+      <item identifierRef="id-r_grp_a_gw"/>
+      <item identifierRef="id-r_grp_a_node_a"/>
+      <item identifierRef="id-r_grp_b_ems"/>
+      <item identifierRef="id-r_grp_b_side"/>
+      <item identifierRef="id-r_grp_b_node_b"/>
+      <item identifierRef="id-r_grp_b_do_trustin"/>
+      <item identifierRef="id-r_gw_ep_over"/>
+      <item identifierRef="id-r_ep_over_coll"/>
+      <item identifierRef="id-r_ep_over_s_phase"/>
+      <item identifierRef="id-r_ep_over_s_restart"/>
+      <item identifierRef="id-r_gw_ep_topo"/>
+      <item identifierRef="id-r_ep_topo_coll"/>
+      <item identifierRef="id-r_ep_topo_s_ready"/>
+      <item identifierRef="id-r_gw_ep_health"/>
+      <item identifierRef="id-r_ep_health_coll"/>
+      <item identifierRef="id-r_ep_health_s_readyz"/>
+      <item identifierRef="id-r_gw_ep_events"/>
+      <item identifierRef="id-r_ep_events_coll"/>
+      <item identifierRef="id-r_ep_events_s_events"/>
+      <item identifierRef="id-r_coll_m_run"/>
+      <item identifierRef="id-r_m_run_in"/>
+      <item identifierRef="id-r_coll_m_rst"/>
+      <item identifierRef="id-r_m_rst_in"/>
+      <item identifierRef="id-r_coll_m_nready"/>
+      <item identifierRef="id-r_m_nready_in"/>
+      <item identifierRef="id-r_coll_m_readyz"/>
+      <item identifierRef="id-r_m_readyz_in"/>
+      <item identifierRef="id-r_coll_m_event"/>
+      <item identifierRef="id-r_m_event_in"/>
+      <item identifierRef="id-r_trust_f_a1"/>
+      <item identifierRef="id-r_f_a1_m_run"/>
+      <item identifierRef="id-r_f_a1_m_nready"/>
+      <item identifierRef="id-r_f_a1_m_readyz"/>
+      <item identifierRef="id-r_trust_f_a3"/>
+      <item identifierRef="id-r_f_a3_m_rst"/>
+      <item identifierRef="id-r_f_a3_m_nready"/>
+      <item identifierRef="id-r_f_a3_m_readyz"/>
+      <item identifierRef="id-r_f_a3_m_event"/>
+      <item identifierRef="id-r_fa1_d"/>
+      <item identifierRef="id-r_fa3_d"/>
+      <item identifierRef="id-r_trust_hist"/>
+      <item identifierRef="id-r_trust_mon"/>
+      <item identifierRef="id-r_kb_d_a1"/>
+      <item identifierRef="id-r_kb_d_a3"/>
+      <item identifierRef="id-r_kb_d_hist"/>
+      <item identifierRef="id-r_kb_d_mon"/>
+      <item identifierRef="id-r_da1_req"/>
+      <item identifierRef="id-r_da3_req"/>
+      <item identifierRef="id-r_tms_da1"/>
+      <item identifierRef="id-r_tms_da3"/>
+      <item identifierRef="id-r_tms_mon"/>
+    </item>
+    <item><label xml:lang="en">Views</label>
+      <item identifierRef="id-v1"/>
+      <item identifierRef="id-v2"/>
+    </item>
+  </organizations>
+  <propertyDefinitions>
+    <propertyDefinition identifier="propid-1" type="string"><name xml:lang="en">attribute_id</name></propertyDefinition>
+    <propertyDefinition identifier="propid-2" type="string"><name xml:lang="en">dstype</name></propertyDefinition>
+    <propertyDefinition identifier="propid-3" type="string"><name xml:lang="en">endpoint</name></propertyDefinition>
+    <propertyDefinition identifier="propid-4" type="string"><name xml:lang="en">flush_interval</name></propertyDefinition>
+    <propertyDefinition identifier="propid-5" type="string"><name xml:lang="en">metrics</name></propertyDefinition>
+    <propertyDefinition identifier="propid-6" type="string"><name xml:lang="en">repo</name></propertyDefinition>
+    <propertyDefinition identifier="propid-7" type="string"><name xml:lang="en">sink_type</name></propertyDefinition>
+    <propertyDefinition identifier="propid-8" type="string"><name xml:lang="en">slo</name></propertyDefinition>
+    <propertyDefinition identifier="propid-9" type="string"><name xml:lang="en">window</name></propertyDefinition>
+  </propertyDefinitions>
+  <views>
+    <diagrams>
+      <view identifier="id-v1" xsi:type="Diagram">
+        <name xml:lang="en">1 · End-to-end: k3s (host A) → gateway → EMS sidecar (host B) → EMS and OptimusDB trust evidence</name>
+        <node identifier="id-v1-n-note_v1" xsi:type="Label" x="30" y="1800" w="2550" h="45"><label xml:lang="en">Swarmchestrate · k3s metrics → EMS → OptimusDB trust evidence (A1 Availability, A3 Operational stability) · k3s-metrics-gateway v0.2.0 · ICCS · 21 Nov 2026</label></node>
+        <node identifier="id-v1-n-drv" elementRef="id-drv" xsi:type="Element" x="30" y="60" w="420" h="105"><style><fillColor r="204" g="204" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v1-n-goal" elementRef="id-goal" xsi:type="Element" x="480" y="60" w="420" h="105"><style><fillColor r="204" g="204" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v1-n-con" elementRef="id-con" xsi:type="Element" x="930" y="60" w="480" h="105"><style><fillColor r="204" g="204" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v1-n-assess" elementRef="id-assess" xsi:type="Element" x="1440" y="60" w="780" h="105"><style><fillColor r="204" g="204" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v1-n-req_a1" elementRef="id-req_a1" xsi:type="Element" x="2250" y="60" w="345" h="105"><style><fillColor r="204" g="204" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v1-n-req_a3" elementRef="id-req_a3" xsi:type="Element" x="2625" y="60" w="345" h="105"><style><fillColor r="204" g="204" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v1-n-br_tms" elementRef="id-br_tms" xsi:type="Element" x="30" y="225" w="420" h="98"><style><fillColor r="255" g="255" b="181"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v1-n-bp_eval" elementRef="id-bp_eval" xsi:type="Element" x="480" y="225" w="420" h="98"><style><fillColor r="255" g="255" b="181"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v1-n-bo_cat" elementRef="id-bo_cat" xsi:type="Element" x="930" y="225" w="480" h="98"><style><fillColor r="255" g="255" b="181"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v1-n-tms" elementRef="id-tms" xsi:type="Element" x="480" y="368" w="420" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v1-n-grp_a" elementRef="id-grp_a" xsi:type="Element" x="30" y="510" w="1395" h="1148"><style><fillColor r="255" g="255" b="255" a="0"/><lineColor r="22" g="45" b="115"/><font name="Segoe UI" size="15"><color r="22" g="45" b="115"/></font></style>
+          <node identifier="id-v1-n-odb" elementRef="id-odb" xsi:type="Element" x="60" y="585" w="1335" h="322"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            <node identifier="id-v1-n-do_kbtrust" elementRef="id-do_kbtrust" xsi:type="Element" x="82" y="645" w="668" h="128"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-do_emsev" elementRef="id-do_emsev" xsi:type="Element" x="82" y="795" w="668" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-odb_api" elementRef="id-odb_api" xsi:type="Element" x="900" y="795" w="472" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+          </node>
+          <node identifier="id-v1-n-gw" elementRef="id-gw" xsi:type="Element" x="60" y="952" w="990" h="292"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            <node identifier="id-v1-n-gw_fn" elementRef="id-gw_fn" xsi:type="Element" x="82" y="1012" w="495" h="210"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-gw_api" elementRef="id-gw_api" xsi:type="Element" x="608" y="1035" w="420" h="82"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+          </node>
+          <node identifier="id-v1-n-node_a" elementRef="id-node_a" xsi:type="Element" x="60" y="1290" w="1335" h="338"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            <node identifier="id-v1-n-k3s_a" elementRef="id-k3s_a" xsi:type="Element" x="90" y="1350" w="480" h="112"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-traefik_a" elementRef="id-traefik_a" xsi:type="Element" x="675" y="1350" w="698" h="112"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-art_gw" elementRef="id-art_gw" xsi:type="Element" x="90" y="1492" w="480" h="98"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-autossh" elementRef="id-autossh" xsi:type="Element" x="675" y="1492" w="698" h="98"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+          </node>
+        </node>
+        <node identifier="id-v1-n-grp_b" elementRef="id-grp_b" xsi:type="Element" x="1515" y="510" w="1455" h="1148"><style><fillColor r="255" g="255" b="255" a="0"/><lineColor r="22" g="45" b="115"/><font name="Segoe UI" size="15"><color r="22" g="45" b="115"/></font></style>
+          <node identifier="id-v1-n-ems" elementRef="id-ems" xsi:type="Element" x="1545" y="585" w="705" h="232"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            <node identifier="id-v1-n-do_topics" elementRef="id-do_topics" xsi:type="Element" x="1568" y="642" w="660" h="75"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-broker" elementRef="id-broker" xsi:type="Element" x="1568" y="732" w="660" h="75"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+          </node>
+          <node identifier="id-v1-n-do_trustin" elementRef="id-do_trustin" xsi:type="Element" x="2288" y="585" w="652" h="232"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v1-n-side" elementRef="id-side" xsi:type="Element" x="1545" y="862" w="1395" h="390"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            <node identifier="id-v1-n-coll" elementRef="id-coll" xsi:type="Element" x="1568" y="922" w="382" h="308"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-ems_sink" elementRef="id-ems_sink" xsi:type="Element" x="1988" y="922" w="262" h="105"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-trust_sink" elementRef="id-trust_sink" xsi:type="Element" x="2288" y="922" w="270" h="308"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-do_state" elementRef="id-do_state" xsi:type="Element" x="2595" y="922" w="322" h="120"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-ui" elementRef="id-ui" xsi:type="Element" x="2595" y="1110" w="322" h="120"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+          </node>
+          <node identifier="id-v1-n-node_b" elementRef="id-node_b" xsi:type="Element" x="1545" y="1290" w="1395" h="338"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            <node identifier="id-v1-n-k3s_b" elementRef="id-k3s_b" xsi:type="Element" x="1575" y="1350" w="630" h="112"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-traefik_b" elementRef="id-traefik_b" xsi:type="Element" x="2250" y="1350" w="660" h="112"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-art_side" elementRef="id-art_side" xsi:type="Element" x="1575" y="1492" w="630" h="98"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v1-n-art_pvc" elementRef="id-art_pvc" xsi:type="Element" x="2250" y="1492" w="660" h="98"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+          </node>
+        </node>
+        <node identifier="id-v1-n-net" elementRef="id-net" xsi:type="Element" x="450" y="1702" w="2100" h="82"><style><fillColor r="201" g="231" b="183"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <connection identifier="id-v1-c-r_drv_goal" relationshipRef="id-r_drv_goal" xsi:type="Relationship" source="id-v1-n-drv" target="id-v1-n-goal"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_a1_goal" relationshipRef="id-r_a1_goal" xsi:type="Relationship" source="id-v1-n-req_a1" target="id-v1-n-goal"><style><lineColor r="64" g="64" b="64"/></style><bendpoint x="2422" y="200"/><bendpoint x="750" y="200"/></connection>
+        <connection identifier="id-v1-c-r_a3_goal" relationshipRef="id-r_a3_goal" xsi:type="Relationship" source="id-v1-n-req_a3" target="id-v1-n-goal"><style><lineColor r="64" g="64" b="64"/></style><bendpoint x="2798" y="210"/><bendpoint x="645" y="210"/></connection>
+        <connection identifier="id-v1-c-r_br_bp" relationshipRef="id-r_br_bp" xsi:type="Relationship" source="id-v1-n-br_tms" target="id-v1-n-bp_eval"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_bp_cat" relationshipRef="id-r_bp_cat" xsi:type="Relationship" source="id-v1-n-bp_eval" target="id-v1-n-bo_cat"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_tms_bp" relationshipRef="id-r_tms_bp" xsi:type="Relationship" source="id-v1-n-tms" target="id-v1-n-bp_eval"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_cat_assess" relationshipRef="id-r_cat_assess" xsi:type="Relationship" source="id-v1-n-bo_cat" target="id-v1-n-assess"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_tms_kb" relationshipRef="id-r_tms_kb" xsi:type="Relationship" source="id-v1-n-tms" target="id-v1-n-do_kbtrust"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_odbapi_tms" relationshipRef="id-r_odbapi_tms" xsi:type="Relationship" source="id-v1-n-odb_api" target="id-v1-n-tms"><style><lineColor r="64" g="64" b="64"/></style><bendpoint x="1136" y="488"/><bendpoint x="780" y="488"/></connection>
+        <connection identifier="id-v1-c-r_k3s_gwfn" relationshipRef="id-r_k3s_gwfn" xsi:type="Relationship" source="id-v1-n-k3s_a" target="id-v1-n-gw_fn"><style><lineColor r="64" g="64" b="64"/></style><bendpoint x="518" y="1340"/><bendpoint x="518" y="1238"/></connection>
+        <connection identifier="id-v1-c-r_tra_gwapi" relationshipRef="id-r_tra_gwapi" xsi:type="Relationship" source="id-v1-n-traefik_a" target="id-v1-n-gw_api"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_tra_odbapi" relationshipRef="id-r_tra_odbapi" xsi:type="Relationship" source="id-v1-n-traefik_a" target="id-v1-n-odb_api"><style><lineColor r="64" g="64" b="64"/></style><bendpoint x="1305" y="1268"/><bendpoint x="1305" y="900"/></connection>
+        <connection identifier="id-v1-c-r_gwapi_coll" relationshipRef="id-r_gwapi_coll" xsi:type="Relationship" source="id-v1-n-gw_api" target="id-v1-n-coll"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_coll_ems" relationshipRef="id-r_coll_ems" xsi:type="Relationship" source="id-v1-n-coll" target="id-v1-n-ems_sink"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_coll_trust" relationshipRef="id-r_coll_trust" xsi:type="Relationship" source="id-v1-n-coll" target="id-v1-n-trust_sink"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_ems_sink_broker" relationshipRef="id-r_ems_sink_broker" xsi:type="Relationship" source="id-v1-n-ems_sink" target="id-v1-n-broker"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_trust_in" relationshipRef="id-r_trust_in" xsi:type="Relationship" source="id-v1-n-trust_sink" target="id-v1-n-do_trustin"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_trust_state" relationshipRef="id-r_trust_state" xsi:type="Relationship" source="id-v1-n-trust_sink" target="id-v1-n-do_state"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_trust_odb" relationshipRef="id-r_trust_odb" xsi:type="Relationship" source="id-v1-n-trust_sink" target="id-v1-n-odb_api"><style><lineColor r="64" g="64" b="64"/></style><bendpoint x="2422" y="1272"/><bendpoint x="1485" y="1272"/><bendpoint x="1485" y="840"/></connection>
+        <connection identifier="id-v1-c-r_broker_odb" relationshipRef="id-r_broker_odb" xsi:type="Relationship" source="id-v1-n-broker" target="id-v1-n-odb"><style><lineColor r="64" g="64" b="64"/></style><bendpoint x="1500" y="770"/><bendpoint x="1500" y="705"/></connection>
+        <connection identifier="id-v1-c-r_trin_a1" relationshipRef="id-r_trin_a1" xsi:type="Relationship" source="id-v1-n-do_trustin" target="id-v1-n-req_a1"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_trin_a3" relationshipRef="id-r_trin_a3" xsi:type="Relationship" source="id-v1-n-do_trustin" target="id-v1-n-req_a3"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_tra_ui" relationshipRef="id-r_tra_ui" xsi:type="Relationship" source="id-v1-n-traefik_b" target="id-v1-n-ui"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_neta" relationshipRef="id-r_neta" xsi:type="Relationship" source="id-v1-n-node_a" target="id-v1-n-net"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v1-c-r_netb" relationshipRef="id-r_netb" xsi:type="Relationship" source="id-v1-n-node_b" target="id-v1-n-net"><style><lineColor r="64" g="64" b="64"/></style></connection>
+      </view>
+      <view identifier="id-v2" xsi:type="Diagram">
+        <name xml:lang="en">2 · Trust attributes A1 / A3: from k3s metrics to OptimusDB trust evidence</name>
+        <node identifier="id-v2-n-grp_a" elementRef="id-grp_a" xsi:type="Element" x="30" y="75" w="840" h="840"><style><fillColor r="255" g="255" b="255" a="0"/><lineColor r="22" g="45" b="115"/><font name="Segoe UI" size="15"><color r="22" g="45" b="115"/></font></style>
+          <node identifier="id-v2-n-s_phase" elementRef="id-s_phase" xsi:type="Element" x="60" y="165" w="345" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-s_restart" elementRef="id-s_restart" xsi:type="Element" x="60" y="292" w="345" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-s_ready" elementRef="id-s_ready" xsi:type="Element" x="60" y="450" w="345" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-s_readyz" elementRef="id-s_readyz" xsi:type="Element" x="60" y="600" w="345" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-s_events" elementRef="id-s_events" xsi:type="Element" x="60" y="750" w="345" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-gw" elementRef="id-gw" xsi:type="Element" x="435" y="135" w="405" h="750"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            <node identifier="id-v2-n-ep_over" elementRef="id-ep_over" xsi:type="Element" x="458" y="225" w="360" h="105"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v2-n-ep_topo" elementRef="id-ep_topo" xsi:type="Element" x="458" y="450" w="360" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v2-n-ep_health" elementRef="id-ep_health" xsi:type="Element" x="458" y="600" w="360" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v2-n-ep_events" elementRef="id-ep_events" xsi:type="Element" x="458" y="750" w="360" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+          </node>
+        </node>
+        <node identifier="id-v2-n-side" elementRef="id-side" xsi:type="Element" x="930" y="75" w="1140" h="840"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          <node identifier="id-v2-n-coll" elementRef="id-coll" xsi:type="Element" x="960" y="165" w="285" h="705"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-m_run" elementRef="id-m_run" xsi:type="Element" x="1290" y="165" w="345" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-m_rst" elementRef="id-m_rst" xsi:type="Element" x="1290" y="292" w="345" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-m_nready" elementRef="id-m_nready" xsi:type="Element" x="1290" y="450" w="345" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-m_readyz" elementRef="id-m_readyz" xsi:type="Element" x="1290" y="600" w="345" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-m_event" elementRef="id-m_event" xsi:type="Element" x="1290" y="750" w="345" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-trust_sink" elementRef="id-trust_sink" xsi:type="Element" x="1680" y="135" w="368" h="750"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            <node identifier="id-v2-n-f_a1" elementRef="id-f_a1" xsi:type="Element" x="1702" y="240" w="322" h="210"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+            <node identifier="id-v2-n-f_a3" elementRef="id-f_a3" xsi:type="Element" x="1702" y="540" w="322" h="270"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+            </node>
+          </node>
+        </node>
+        <node identifier="id-v2-n-odb" elementRef="id-odb" xsi:type="Element" x="2130" y="75" w="450" h="840"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          <node identifier="id-v2-n-d_a1" elementRef="id-d_a1" xsi:type="Element" x="2152" y="202" w="405" h="135"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-d_a3" elementRef="id-d_a3" xsi:type="Element" x="2152" y="548" w="405" h="135"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-d_hist" elementRef="id-d_hist" xsi:type="Element" x="2152" y="368" w="405" h="90"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+          <node identifier="id-v2-n-d_mon" elementRef="id-d_mon" xsi:type="Element" x="2152" y="720" w="405" h="120"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+          </node>
+        </node>
+        <node identifier="id-v2-n-req_a1" elementRef="id-req_a1" xsi:type="Element" x="2640" y="210" w="330" h="120"><style><fillColor r="204" g="204" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v2-n-req_a3" elementRef="id-req_a3" xsi:type="Element" x="2640" y="555" w="330" h="120"><style><fillColor r="204" g="204" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <node identifier="id-v2-n-note_v2" xsi:type="Label" x="30" y="938" w="2550" h="45"><label xml:lang="en">A1 = available checks / observed checks (30 d, SLO ≥ 0.995) · A3 = restart increase or ready→not-ready (7 d, SLO ≤ 2), score = max(0, 1 − n/3) · Warning events kept as evidence</label></node>
+        <node identifier="id-v2-n-tms" elementRef="id-tms" xsi:type="Element" x="2640" y="780" w="330" h="105"><style><fillColor r="181" g="255" b="255"/><lineColor r="92" g="92" b="92"/><font name="Segoe UI" size="14"><color r="0" g="0" b="0"/></font></style>
+        </node>
+        <connection identifier="id-v2-c-r_ep_over_s_phase" relationshipRef="id-r_ep_over_s_phase" xsi:type="Relationship" source="id-v2-n-ep_over" target="id-v2-n-s_phase"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_ep_over_s_restart" relationshipRef="id-r_ep_over_s_restart" xsi:type="Relationship" source="id-v2-n-ep_over" target="id-v2-n-s_restart"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_ep_topo_s_ready" relationshipRef="id-r_ep_topo_s_ready" xsi:type="Relationship" source="id-v2-n-ep_topo" target="id-v2-n-s_ready"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_ep_health_s_readyz" relationshipRef="id-r_ep_health_s_readyz" xsi:type="Relationship" source="id-v2-n-ep_health" target="id-v2-n-s_readyz"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_ep_events_s_events" relationshipRef="id-r_ep_events_s_events" xsi:type="Relationship" source="id-v2-n-ep_events" target="id-v2-n-s_events"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_ep_over_coll" relationshipRef="id-r_ep_over_coll" xsi:type="Relationship" source="id-v2-n-ep_over" target="id-v2-n-coll"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_ep_topo_coll" relationshipRef="id-r_ep_topo_coll" xsi:type="Relationship" source="id-v2-n-ep_topo" target="id-v2-n-coll"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_ep_health_coll" relationshipRef="id-r_ep_health_coll" xsi:type="Relationship" source="id-v2-n-ep_health" target="id-v2-n-coll"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_ep_events_coll" relationshipRef="id-r_ep_events_coll" xsi:type="Relationship" source="id-v2-n-ep_events" target="id-v2-n-coll"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_coll_m_run" relationshipRef="id-r_coll_m_run" xsi:type="Relationship" source="id-v2-n-coll" target="id-v2-n-m_run"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_coll_m_rst" relationshipRef="id-r_coll_m_rst" xsi:type="Relationship" source="id-v2-n-coll" target="id-v2-n-m_rst"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_coll_m_nready" relationshipRef="id-r_coll_m_nready" xsi:type="Relationship" source="id-v2-n-coll" target="id-v2-n-m_nready"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_coll_m_readyz" relationshipRef="id-r_coll_m_readyz" xsi:type="Relationship" source="id-v2-n-coll" target="id-v2-n-m_readyz"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_coll_m_event" relationshipRef="id-r_coll_m_event" xsi:type="Relationship" source="id-v2-n-coll" target="id-v2-n-m_event"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_f_a1_m_run" relationshipRef="id-r_f_a1_m_run" xsi:type="Relationship" source="id-v2-n-f_a1" target="id-v2-n-m_run"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_f_a1_m_nready" relationshipRef="id-r_f_a1_m_nready" xsi:type="Relationship" source="id-v2-n-f_a1" target="id-v2-n-m_nready"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_f_a1_m_readyz" relationshipRef="id-r_f_a1_m_readyz" xsi:type="Relationship" source="id-v2-n-f_a1" target="id-v2-n-m_readyz"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_f_a3_m_rst" relationshipRef="id-r_f_a3_m_rst" xsi:type="Relationship" source="id-v2-n-f_a3" target="id-v2-n-m_rst"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_f_a3_m_nready" relationshipRef="id-r_f_a3_m_nready" xsi:type="Relationship" source="id-v2-n-f_a3" target="id-v2-n-m_nready"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_f_a3_m_readyz" relationshipRef="id-r_f_a3_m_readyz" xsi:type="Relationship" source="id-v2-n-f_a3" target="id-v2-n-m_readyz"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_f_a3_m_event" relationshipRef="id-r_f_a3_m_event" xsi:type="Relationship" source="id-v2-n-f_a3" target="id-v2-n-m_event"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_fa1_d" relationshipRef="id-r_fa1_d" xsi:type="Relationship" source="id-v2-n-f_a1" target="id-v2-n-d_a1"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_fa3_d" relationshipRef="id-r_fa3_d" xsi:type="Relationship" source="id-v2-n-f_a3" target="id-v2-n-d_a3"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_trust_hist" relationshipRef="id-r_trust_hist" xsi:type="Relationship" source="id-v2-n-trust_sink" target="id-v2-n-d_hist"><style><lineColor r="64" g="64" b="64"/></style><bendpoint x="2092" y="412"/></connection>
+        <connection identifier="id-v2-c-r_trust_mon" relationshipRef="id-r_trust_mon" xsi:type="Relationship" source="id-v2-n-trust_sink" target="id-v2-n-d_mon"><style><lineColor r="64" g="64" b="64"/></style><bendpoint x="2092" y="780"/></connection>
+        <connection identifier="id-v2-c-r_da1_req" relationshipRef="id-r_da1_req" xsi:type="Relationship" source="id-v2-n-d_a1" target="id-v2-n-req_a1"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_da3_req" relationshipRef="id-r_da3_req" xsi:type="Relationship" source="id-v2-n-d_a3" target="id-v2-n-req_a3"><style><lineColor r="64" g="64" b="64"/></style></connection>
+        <connection identifier="id-v2-c-r_tms_mon" relationshipRef="id-r_tms_mon" xsi:type="Relationship" source="id-v2-n-tms" target="id-v2-n-d_mon"><style><lineColor r="64" g="64" b="64"/></style></connection>
+      </view>
+    </diagrams>
+  </views>
+</model>

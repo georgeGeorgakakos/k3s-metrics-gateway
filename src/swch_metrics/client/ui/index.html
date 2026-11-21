@@ -21,9 +21,13 @@
       <span class="product-name">k3s Metrics Client</span>
       <span class="product-sub">EMS sidecar</span>
     </div>
+    <div class="partners" aria-label="Developed by">
+      <img src="ui/logos/imu.png" alt="IMU · Information Management Unit" title="IMU · Information Management Unit (ICCS)">
+      <img src="ui/logos/iccs.png" alt="ICCS · ΕΠΙΣΕΥ" title="Institute of Communication and Computer Systems (ICCS / ΕΠΙΣΕΥ)">
+    </div>
     <div class="pills">
       <span class="pill" id="pill-demo" hidden title="Running with simulated data">DEMO</span>
-      <span class="pill" id="pill-gw" title="Metrics gateway"><i></i>Gateway</span>
+      <span class="pill" id="pill-gw" title="Metrics gateways"><i></i><span id="pill-gw-text">Gateways</span></span>
       <span class="pill" id="pill-ems" title="EMS broker sink"><i></i>EMS</span>
     </div>
   </div>
@@ -40,6 +44,7 @@
   </div>
   <nav class="wrap tabs" id="tabs">
     <a href="#dashboard" data-tab="dashboard">Dashboard</a>
+    <a href="#gateways" data-tab="gateways">Gateways</a>
     <a href="#collectors" data-tab="collectors">Collectors</a>
     <a href="#sinks" data-tab="sinks">Sinks</a>
     <a href="#topology" data-tab="topology">Topology</a>
@@ -75,6 +80,30 @@
     </div>
   </section>
 
+  <!-- GATEWAYS (one per k3s cluster) -->
+  <section class="view" id="view-gateways" hidden>
+    <div class="card">
+      <div class="card-head">
+        <div><h2>Gateways · k3s clusters</h2><p class="muted">Every k3s cluster runs one k3s Metrics Gateway. This sidecar polls all enabled gateways with every collector and labels each sample with its cluster.</p></div>
+        <button class="btn primary" id="add-gateway">+ Add gateway</button>
+      </div>
+      <table class="table" id="gateways-table"></table>
+    </div>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-head"><h2>Automatic registration</h2><span id="reg-badge"></span></div>
+        <p class="muted">A gateway deployed on a new k3s host announces itself here and is polled straight away, with no manual step on the EMS host. It repeats the announcement every 5 minutes as a heartbeat.</p>
+        <dl class="kv" id="reg-info"></dl>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Onboard a new k3s host</h2></div>
+        <p class="muted">On the new host (k3s with Traefik on port 80):</p>
+        <pre class="code" id="onboard-cmd"></pre>
+        <p class="muted">The script installs the gateway, exposes it on <code>/swch-metrics</code> and registers it with this sidecar.</p>
+      </div>
+    </div>
+  </section>
+
   <!-- COLLECTORS -->
   <section class="view" id="view-collectors" hidden>
     <div class="card">
@@ -104,7 +133,7 @@
   <!-- TOPOLOGY -->
   <section class="view" id="view-topology" hidden>
     <div class="card">
-      <div class="card-head"><h2>Topology</h2><span class="muted" id="topo-hash"></span></div>
+      <div class="card-head"><h2>Topology</h2><div class="controls"><select id="topo-gateway" aria-label="Cluster"></select><span class="muted" id="topo-hash"></span></div></div>
       <div id="topo-diagram" class="topo-diagram"></div>
     </div>
     <div class="card">
@@ -123,6 +152,7 @@
       <div class="card-head">
         <h2>Latest samples</h2>
         <div class="controls">
+          <select id="sample-cluster"><option value="">All clusters</option></select>
           <select id="sample-collector"><option value="">All collectors</option></select>
           <input id="sample-filter" type="search" placeholder="Filter metric, pod, node…">
         </div>
@@ -167,7 +197,13 @@
       <strong>Swarmchestrate</strong> — Application-level Swarm-based Orchestration Across the Cloud-to-Edge Continuum
       <div class="muted-light">Funded by the European Union, Horizon Europe grant agreement No. 101135012.</div>
     </div>
-    <div class="muted-light" id="version"></div>
+    <div class="footer-right">
+      <div class="footer-logos">
+        <img src="ui/logos/imu-white.png" alt="IMU · Information Management Unit">
+        <img src="ui/logos/iccs-white.png" alt="ICCS · ΕΠΙΣΕΥ">
+      </div>
+      <div class="muted-light" id="version"></div>
+    </div>
   </div>
 </footer>
 

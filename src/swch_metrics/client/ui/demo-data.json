@@ -320,7 +320,21 @@
     "destination": {
      "type": "string",
      "default": "/topic/{metric}",
-     "description": "Destination template; placeholders {metric} {collector} {instance}",
+     "description": "Destination template; placeholders {metric} {collector} {instance} {cluster}",
+     "required": false
+    },
+    "instance_template": {
+     "type": "string",
+     "default": "{instance}",
+     "description": "EMS 'instance' header; e.g. {cluster}/{instance} when node names repeat across clusters",
+     "required": false
+    },
+    "body_labels": {
+     "type": "list",
+     "default": [
+      "cluster"
+     ],
+     "description": "Labels added to the ems_event body (lets OptimusDB ems_events tell clusters apart); empty = none",
      "required": false
     },
     "body_format": {
@@ -393,6 +407,147 @@
    }
   },
   {
+   "type": "optimusdb_trust",
+   "title": "OptimusDB trust evidence",
+   "description": "Derive trust attributes A1 Availability and A3 Operational stability per pod, node and control plane and upsert them into an OptimusDB datastore (default kbtrust).",
+   "options": {
+    "url": {
+     "type": "string",
+     "default": "http://193.225.250.240/optimusdb1",
+     "description": "OptimusDB agent base URL",
+     "required": true
+    },
+    "context": {
+     "type": "string",
+     "default": "swarmkb",
+     "description": "OptimusDB API context",
+     "required": false
+    },
+    "dstype": {
+     "type": "string",
+     "default": "kbtrust",
+     "description": "Datastore (dstype) for the trust documents",
+     "required": false
+    },
+    "cluster": {
+     "type": "string",
+     "default": "",
+     "description": "Cluster name in the documents (empty = topology cluster_id, then the 'cluster' label)",
+     "required": false
+    },
+    "flush_interval": {
+     "type": "string",
+     "default": "60s",
+     "description": "How often documents are written",
+     "required": false
+    },
+    "availability_window": {
+     "type": "string",
+     "default": "30d",
+     "description": "Rolling window for A1",
+     "required": false
+    },
+    "availability_slo": {
+     "type": "number",
+     "default": 0.995,
+     "description": "A1 SLO: minimum availability ratio",
+     "required": false
+    },
+    "stability_window": {
+     "type": "string",
+     "default": "7d",
+     "description": "Rolling window for A3",
+     "required": false
+    },
+    "max_unplanned_restarts": {
+     "type": "integer",
+     "default": 2,
+     "description": "A3 SLO: maximum unplanned restarts in the window",
+     "required": false
+    },
+    "namespaces": {
+     "type": "list",
+     "default": [],
+     "description": "Only pods in these namespaces (empty = all collected)",
+     "required": false
+    },
+    "exclude_pod_regex": {
+     "type": "string",
+     "default": "",
+     "description": "Skip pods whose name matches (e.g. job pods)",
+     "required": false
+    },
+    "warning_reasons": {
+     "type": "list",
+     "default": [
+      "BackOff",
+      "OOMKilling",
+      "Unhealthy",
+      "Failed",
+      "Evicted",
+      "Rebooted",
+      "NodeNotReady"
+     ],
+     "description": "Warning events attached as A3 evidence",
+     "required": false
+    },
+    "did_template": {
+     "type": "string",
+     "default": "did:swarm:{cluster}:{kind}:{id}",
+     "description": "Subject DID; placeholders {cluster} {kind} {id} {name} {namespace}",
+     "required": false
+    },
+    "did_map": {
+     "type": "json",
+     "default": {},
+     "description": "Explicit DIDs by subject name, e.g. {\"epm-server\": \"did:swarm:capacity-vm-01\"}",
+     "required": false
+    },
+    "history": {
+     "type": "boolean",
+     "default": true,
+     "description": "Also write an hourly append-only copy (trust_evidence_history)",
+     "required": false
+    },
+    "monitoring_snapshot": {
+     "type": "boolean",
+     "default": true,
+     "description": "Also write a monitoring_snapshot per subject (optimusTrust shape)",
+     "required": false
+    },
+    "state_path": {
+     "type": "string",
+     "default": "/data/trust-state.json",
+     "description": "Rolling-window state file (on the PVC)",
+     "required": false
+    },
+    "headers": {
+     "type": "json",
+     "default": {},
+     "description": "Extra HTTP headers (e.g. auth)",
+     "required": false
+    },
+    "timeout": {
+     "type": "integer",
+     "default": 15,
+     "description": "HTTP timeout (s)",
+     "required": false
+    },
+    "max_docs_per_request": {
+     "type": "integer",
+     "default": 50,
+     "description": "Batch size per crudput",
+     "required": false
+    },
+    "dry_run": {
+     "type": "boolean",
+     "default": false,
+     "description": "Build the documents but do not write them",
+     "required": false
+    }
+   }
+  },
+  {
    "type": "webhook",
    "title": "HTTP webhook",
    "description": "POST each batch as JSON to an HTTP endpoint (e.g. OptimusDB, a data lake ingest, n8n).",
@@ -429,10 +584,38 @@
    "region": "${REGION:-}",
    "zone": "${ZONE:-}"
   },
-  "gateway": {
-   "url": "${GATEWAY_URL:-http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000}",
-   "api_key": "${GATEWAY_API_KEY:-}",
-   "timeout": 10
+  "gateways": [
+   {
+    "id": "default",
+    "url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000",
+    "cluster": "swch-demo"
+   },
+   {
+    "id": "edge-athens-02",
+    "url": "http://172.16.5.40/swch-metrics",
+    "api_key": "${EDGE_KEY:-}",
+    "source": "registered",
+    "cluster": "edge-athens-02",
+    "swarm_id": "swarm-demo-01",
+    "cluster_uid": "8a2e61d4-0c5b-47f2-b1aa-6d3f2e9c7b15",
+    "registered_at": "2026-11-21T08:12:44Z"
+   },
+   {
+    "id": "lab-budapest",
+    "url": "http://192.168.10.50/swch-metrics",
+    "api_key": "${LAB_KEY:-}",
+    "source": "registered",
+    "cluster": "lab-budapest",
+    "swarm_id": "swarm-demo-01",
+    "cluster_uid": "c47b0e93-51f8-4d2a-9e6c-1b8d7a3f0e22",
+    "registered_at": "2026-11-21T09:40:03Z"
+   }
+  ],
+  "registration": {
+   "enabled": true,
+   "token": "${REGISTRATION_TOKEN:-}",
+   "auto_approve": true,
+   "stale_after": "15m"
   },
   "ui": {
    "enabled": true,
@@ -465,6 +648,18 @@
     "options": {
      "max_lines": 20
     }
+   },
+   {
+    "id": "optimusdb-trust",
+    "type": "optimusdb_trust",
+    "enabled": false,
+    "options": {
+     "url": "${OPTIMUSDB_URL:-http://193.225.250.240/optimusdb1}",
+     "context": "swarmkb",
+     "dstype": "kbtrust",
+     "cluster": "${TRUST_CLUSTER:-}",
+     "flush_interval": "60s"
+    }
    }
   ],
   "collectors": [
@@ -491,7 +686,8 @@
     "metrics": [
      "pod_cpu_pct_of_limit",
      "pod_memory_pct_of_limit",
-     "pod_restarts"
+     "pod_restarts",
+     "pod_running"
     ]
    },
    {
@@ -506,6 +702,11 @@
     "id": "topology",
     "type": "topology",
     "interval": "2m"
+   },
+   {
+    "id": "control-plane",
+    "type": "apiserver_health",
+    "interval": "30s"
    }
   ]
  },
@@ -883,5 +1084,230 @@
   ],
   "hash": "d8f85bd563a659da",
   "updated_at": "2026-01-01T00:00:00+00:00"
- }
+ },
+ "clusters": [
+  {
+   "id": "default",
+   "cluster": "swch-demo",
+   "cluster_uid": "5f1c2a7e-3b9d-4c61-9a0e-7d2b8c4e1f90",
+   "summary": {
+    "nodes": 3,
+    "ready": 3,
+    "control_plane": 1,
+    "zones": [
+     "edge-athens",
+     "eu-west-1a",
+     "sztaki-cloud"
+    ],
+    "regions": [
+     "eu-west-1",
+     "gr-athens",
+     "hu-budapest"
+    ],
+    "clouds": [
+     "aws",
+     "edge",
+     "openstack"
+    ]
+   }
+  },
+  {
+   "id": "edge-athens-02",
+   "cluster": "edge-athens-02",
+   "cluster_uid": "8a2e61d4-0c5b-47f2-b1aa-6d3f2e9c7b15",
+   "summary": {
+    "nodes": 2,
+    "ready": 2,
+    "zones": [
+     "edge-athens"
+    ],
+    "clouds": [
+     "edge"
+    ]
+   },
+   "hb_ago": 70,
+   "nodes_list": [
+    {
+     "name": "edge-athens-0",
+     "uid": "uid-swch-master-aws",
+     "roles": [
+      "control-plane",
+      "master"
+     ],
+     "internal_ip": "172.16.5.41",
+     "external_ip": null,
+     "hostname": null,
+     "region": "gr-athens",
+     "zone": "edge-athens",
+     "cloud": "edge",
+     "instance_type": null,
+     "arch": "arm64",
+     "os_image": "Ubuntu 24.04.1 LTS",
+     "kubelet_version": "v1.33.4+k3s1",
+     "container_runtime": "containerd://2.0.5-k3s2",
+     "pod_cidr": "10.42.0.0/24",
+     "ready": true,
+     "conditions": {
+      "Ready": "True"
+     },
+     "unschedulable": false,
+     "capacity": {
+      "cpu": "4",
+      "memory": "7834380Ki",
+      "pods": "110"
+     },
+     "allocatable": {
+      "cpu": "4",
+      "memory": "7834380Ki",
+      "pods": "110"
+     },
+     "labels": {
+      "node-role.kubernetes.io/control-plane": "true",
+      "node-role.kubernetes.io/master": "true",
+      "topology.kubernetes.io/region": "eu-west-1",
+      "topology.kubernetes.io/zone": "eu-west-1a",
+      "swarmchestrate.eu/cloud": "aws",
+      "kubernetes.io/arch": "amd64"
+     },
+     "metrics": {
+      "kubelet_summary": "/nodes/swch-master-aws/summary",
+      "cadvisor": "/nodes/swch-master-aws/cadvisor",
+      "probes": "/nodes/swch-master-aws/probes"
+     }
+    },
+    {
+     "name": "edge-athens-1",
+     "uid": "uid-swch-worker-openstack",
+     "roles": [
+      "worker"
+     ],
+     "internal_ip": "172.16.5.42",
+     "external_ip": null,
+     "hostname": null,
+     "region": "gr-athens",
+     "zone": "edge-athens",
+     "cloud": "edge",
+     "instance_type": null,
+     "arch": "arm64",
+     "os_image": "Ubuntu 24.04.1 LTS",
+     "kubelet_version": "v1.33.4+k3s1",
+     "container_runtime": "containerd://2.0.5-k3s2",
+     "pod_cidr": "10.42.0.0/24",
+     "ready": true,
+     "conditions": {
+      "Ready": "True"
+     },
+     "unschedulable": false,
+     "capacity": {
+      "cpu": "8",
+      "memory": "16231716Ki",
+      "pods": "110"
+     },
+     "allocatable": {
+      "cpu": "8",
+      "memory": "16231716Ki",
+      "pods": "110"
+     },
+     "labels": {
+      "topology.kubernetes.io/region": "hu-budapest",
+      "topology.kubernetes.io/zone": "sztaki-cloud",
+      "swarmchestrate.eu/cloud": "openstack",
+      "kubernetes.io/arch": "amd64"
+     },
+     "metrics": {
+      "kubelet_summary": "/nodes/swch-worker-openstack/summary",
+      "cadvisor": "/nodes/swch-worker-openstack/cadvisor",
+      "probes": "/nodes/swch-worker-openstack/probes"
+     }
+    }
+   ],
+   "pods": [
+    [
+     "optimusddc",
+     "optimusdb1-6d9f7c8b5-k2x7p"
+    ],
+    [
+     "optimusddc",
+     "optimusdb2-7c8d9b6f4-x2q4z"
+    ],
+    [
+     "default",
+     "sensor-gw-5b7d"
+    ]
+   ]
+  },
+  {
+   "id": "lab-budapest",
+   "cluster": "lab-budapest",
+   "cluster_uid": "c47b0e93-51f8-4d2a-9e6c-1b8d7a3f0e22",
+   "summary": {
+    "nodes": 1,
+    "ready": 1,
+    "zones": [
+     "sztaki-cloud"
+    ],
+    "clouds": [
+     "openstack"
+    ]
+   },
+   "hb_ago": 200,
+   "nodes_list": [
+    {
+     "name": "lab-bud-master",
+     "uid": "uid-swch-worker-openstack",
+     "roles": [
+      "worker"
+     ],
+     "internal_ip": "192.168.10.51",
+     "external_ip": null,
+     "hostname": null,
+     "region": "hu-budapest",
+     "zone": "sztaki-cloud",
+     "cloud": "openstack",
+     "instance_type": null,
+     "arch": "amd64",
+     "os_image": "Ubuntu 24.04.1 LTS",
+     "kubelet_version": "v1.33.4+k3s1",
+     "container_runtime": "containerd://2.0.5-k3s2",
+     "pod_cidr": "10.42.0.0/24",
+     "ready": true,
+     "conditions": {
+      "Ready": "True"
+     },
+     "unschedulable": false,
+     "capacity": {
+      "cpu": "8",
+      "memory": "16231716Ki",
+      "pods": "110"
+     },
+     "allocatable": {
+      "cpu": "8",
+      "memory": "16231716Ki",
+      "pods": "110"
+     },
+     "labels": {
+      "topology.kubernetes.io/region": "hu-budapest",
+      "topology.kubernetes.io/zone": "sztaki-cloud",
+      "swarmchestrate.eu/cloud": "openstack",
+      "kubernetes.io/arch": "amd64"
+     },
+     "metrics": {
+      "kubelet_summary": "/nodes/swch-worker-openstack/summary",
+      "cadvisor": "/nodes/swch-worker-openstack/cadvisor",
+      "probes": "/nodes/swch-worker-openstack/probes"
+     }
+    }
+   ],
+   "pods": [
+    [
+     "default",
+     "lib-optimiser-77c"
+    ],
+    [
+     "default",
+     "resource-agent-5b2"
+    ]
+   ]
+  }
+ ]
 }

@@ -41,7 +41,11 @@ class EmsStompSink(Sink):
         "username": param("string", "", "Broker username"),
         "password": param("secret", "", "Broker password"),
         "destination": param("string", "/topic/{metric}",
-                             "Destination template; placeholders {metric} {collector} {instance}"),
+                             "Destination template; placeholders {metric} {collector} {instance} {cluster}"),
+        "instance_template": param("string", "{instance}",
+                                   "EMS 'instance' header; e.g. {cluster}/{instance} when node names repeat across clusters"),
+        "body_labels": param("list", ["cluster"],
+                             "Labels added to the ems_event body (lets OptimusDB ems_events tell clusters apart); empty = none"),
         "body_format": param("string", "ems_event", "Message body",
                              enum=["ems_event", "json", "headers_only"]),
         "level": param("integer", 1, "EMS event level"),
@@ -81,17 +85,30 @@ class EmsStompSink(Sink):
             self._next_retry = time.monotonic() + 10
             raise ConnectionError(f"{type(e).__name__}: {e}") from e
 
+    def _gateway_url(self, s: Sample) -> str:
+        gid = s.labels.get("gateway")
+        g = next((g for g in self.client_cfg.gateways if g.id == gid), None) if gid else None
+        return (g or self.client_cfg.gateway).url.rstrip("/")
+
+    def instance(self, s: Sample) -> str:
+        lbl = s.labels
+        inst = s.instance or lbl.get("node") or lbl.get("pod") or "cluster"
+        tpl = self.opts.get("instance_template") or "{instance}"
+        return tpl.format(instance=inst, cluster=lbl.get("cluster", ""), gateway=lbl.get("gateway", ""))
+
     def headers(self, s: Sample) -> dict[str, str]:
         lbl = s.labels
         h = {
             "metric": s.metric,
-            "instance": s.instance or lbl.get("node") or lbl.get("pod") or "cluster",
+            "instance": self.instance(s),
             "timestamp": str(s.timestamp_ms),
             "node-id": CLIENT_NODE_ID,
             "producer": self.client_cfg.client_name,
             "producer-host": os.getenv("POD_IP", socket.gethostname()),
             "source-node": lbl.get("node") or os.getenv("NODE_NAME", ""),
-            "source-endpoint": f"{self.client_cfg.gateway.url.rstrip('/')}{s.source}",
+            "source-endpoint": f"{self._gateway_url(s)}{s.source}",
+            "cluster": lbl.get("cluster", ""), "cluster-uid": lbl.get("cluster_uid", ""),
+            "gateway": lbl.get("gateway", ""),
             "collector": s.collector,
             "cloud": lbl.get("cloud", ""), "region": lbl.get("region", ""), "zone": lbl.get("zone", ""),
             "swarm-id": lbl.get("swarm_id", ""),
@@ -110,12 +127,15 @@ class EmsStompSink(Sink):
             return ""
         if fmt == "json":
             return json.dumps(s.to_dict(), default=str)
-        return json.dumps({"metricValue": s.value, "level": int(self.opts.get("level") or 1),
-                           "timestamp": s.timestamp_ms})
+        body = {"metricValue": s.value, "level": int(self.opts.get("level") or 1), "timestamp": s.timestamp_ms}
+        for k in self.opts.get("body_labels") or []:
+            if s.labels.get(k):
+                body[k] = s.labels[k]
+        return json.dumps(body)
 
     def destination(self, s: Sample) -> str:
         return self.opts["destination"].format(metric=s.metric, collector=s.collector,
-                                               instance=s.instance or "cluster")
+                                               instance=s.instance or "cluster", cluster=s.labels.get("cluster", ""))
 
     async def send(self, samples):
         cap = int(self.opts.get("max_messages_per_batch") or 5000)

@@ -19,6 +19,10 @@ Environment:
   ATTACH_EMS_SIDECAR    attach the metrics-client sidecar to EMS (default true)
   EMS_NAMESPACES        namespaces to look for EMS in (default swarm-system,default)
   EMS_DEPLOYMENT        EMS Deployment name (default emsserver-ems-server)
+  REGISTER_URL          EMS sidecar registration URL(s), comma-separated (enables self-registration)
+  REGISTER_TOKEN        shared registration token
+  PUBLIC_URL            gateway URL as reachable from the EMS host (default GATEWAY_URL)
+  REGISTER_INTERVAL     seconds between registration heartbeats (default 300)
 """
 from __future__ import annotations
 
@@ -36,6 +40,7 @@ from prometheus_client.parser import text_string_to_metric_families
 
 from .. import __version__
 from . import attacher as _attacher
+from . import registrar as _registrar
 from . import topology as _topology
 from .k8s import TIMEOUT, k8s, own_namespace
 
@@ -61,16 +66,35 @@ async def lifespan(_app: FastAPI):
         a = _attacher.SidecarAttacher(lambda: k8s(), float(os.getenv("ATTACH_INTERVAL", "30")))
         a.start()
         _bg["attacher"] = a
+    r = _registrar.Registrar.from_env(_latest_topology)
+    if r:
+        r.start()
+        _bg["registrar"] = r
     yield
     for th in _bg.values():
         th.stop()
+
+
+def _latest_topology() -> dict | None:
+    t = _bg.get("topology")
+    if t is not None and t.last:
+        return t.last
+    try:
+        return _topology.build_topology(k8s(), None)
+    except Exception as e:  # noqa: BLE001
+        log.warning("topology for registration unavailable: %s", e)
+        return None
 
 
 OPEN_PATHS = {"/health", "/docs", "/openapi.json", "/docs/oauth2-redirect", "/redoc"}
 
 
 def require_key(request: Request, x_api_key: Optional[str] = Header(default=None)):
-    if request.url.path in OPEN_PATHS:
+    path = request.url.path
+    root = request.scope.get("root_path", "")
+    if root and path.startswith(root):
+        path = path[len(root):] or "/"
+    if path in OPEN_PATHS:
         return
     if API_KEY and x_api_key != API_KEY:
         raise HTTPException(401, "invalid or missing X-API-Key")
@@ -568,7 +592,26 @@ def status():
         "topology": None if not t else {"hash": t.last_hash, "error": t.last_error,
                                         "configmap": _topology.TOPOLOGY_CONFIGMAP},
         "sidecar_attacher": None if not a else {"targets": a.last, "error": a.last_error},
+        "registration": None if not _bg.get("registrar") else _bg["registrar"].status(),
     }
+
+
+@app.get("/registration", tags=["meta"], summary="Self-registration with the EMS sidecar(s)")
+def registration():
+    r = _bg.get("registrar")
+    if r is None:
+        return {"enabled": False, "hint": "set REGISTER_URL (and REGISTER_TOKEN) to announce this gateway to EMS"}
+    return {"enabled": True, **r.status(), "payload": {**_registrar.registration_payload(_latest_topology()),
+                                                       "api_key": "***" if API_KEY else None}}
+
+
+@app.post("/registration", tags=["meta"], summary="Register with the EMS sidecar(s) now")
+def registration_now():
+    r = _bg.get("registrar")
+    if r is None:
+        raise HTTPException(409, "registration disabled (REGISTER_URL not set)")
+    ok = r.register_once()
+    return {"ok": ok, **r.status()}
 
 
 # --------------------------------------------------------------------------- #

@@ -63,7 +63,9 @@ class Collector:
         raise NotImplementedError
 
     # --- pipeline ---
-    async def collect(self, gw: GatewayClient) -> list[Sample]:
+    async def collect(self, gw: GatewayClient, cluster_labels: dict[str, str] | None = None) -> list[Sample]:
+        """Poll ``gw`` and return samples. ``cluster_labels`` identify the cluster behind ``gw``
+        (cluster, swarm_id, gateway ...); they override the client's static labels."""
         path = self.path()
         data = await gw.get(path, self.query())
         ts = now_ms()
@@ -71,9 +73,9 @@ class Collector:
         for s in samples:
             s.collector, s.source = self.cfg.id, path
             s.timestamp_ms = s.timestamp_ms or ts
-        return self.post_process(samples)
+        return self.post_process(samples, cluster_labels)
 
-    def post_process(self, samples: list[Sample]) -> list[Sample]:
+    def post_process(self, samples: list[Sample], cluster_labels: dict[str, str] | None = None) -> list[Sample]:
         c = self.cfg
         if c.include_namespaces:
             samples = [s for s in samples if "namespace" not in s.labels or s.labels["namespace"] in c.include_namespaces]
@@ -85,6 +87,7 @@ class Collector:
             samples += aggregate(samples, c.aggregate)
         prefix = c.metric_prefix if c.metric_prefix is not None else self.client_cfg.metric_prefix
         static = {k: v for k, v in self.client_cfg.labels.items() if v}
+        static.update(cluster_labels or {})
         for s in samples:
             s.metric = f"{prefix}{s.metric}"
             s.labels = {**static, **s.labels}

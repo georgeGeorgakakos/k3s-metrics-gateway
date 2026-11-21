@@ -11,6 +11,7 @@ test:               ## unit tests
 
 manifest:           ## regenerate deploy/k3s/*.yaml and deploy/ems/*.yaml
 	python3 scripts/render_manifest.py
+	python3 scripts/render_manifest.py --onboard-template -o deploy/k3s/swch-metrics-gateway-onboard.yaml
 
 demo-data:          ## regenerate the UI demo data (GitHub Pages)
 	python3 scripts/build_demo_data.py

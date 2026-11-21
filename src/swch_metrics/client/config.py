@@ -11,20 +11,20 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 _ENV = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
-_DUR = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s|sec|m|min|h)?\s*$", re.I)
+_DUR = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s|sec|m|min|h|d|w)?\s*$", re.I)
 
 MIN_INTERVAL = 1.0
 
 
 def parse_duration(v: Any) -> float:
-    """'15s' | '1m' | '500ms' | '2h' | 30 -> seconds."""
+    """'15s' | '1m' | '500ms' | '2h' | '7d' | 30 -> seconds."""
     if isinstance(v, (int, float)):
         return float(v)
     m = _DUR.match(str(v))
     if not m:
         raise ValueError(f"invalid duration {v!r} (use e.g. 15s, 1m, 500ms)")
     n, unit = float(m.group(1)), (m.group(2) or "s").lower()
-    return n * {"ms": 0.001, "s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600}[unit]
+    return n * {"ms": 0.001, "s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600, "d": 86400, "w": 604800}[unit]
 
 
 def expand_env(obj: Any) -> Any:
@@ -38,11 +38,48 @@ def expand_env(obj: Any) -> Any:
     return obj
 
 
+_ID = re.compile(r"[a-z0-9][a-z0-9_\-]{0,62}")
+
+
+def slug(v: str | None, fallback: str = "gateway") -> str:
+    """'EPM Server.01' -> 'epm-server-01' (valid gateway / collector id)."""
+    out = re.sub(r"[^a-z0-9_\-]+", "-", str(v or "").lower()).strip("-_")[:63]
+    return out if out and _ID.fullmatch(out) else fallback
+
+
 class GatewayCfg(BaseModel):
+    """One k3s Metrics Gateway (= one k3s cluster) polled by this client."""
+    id: str = "default"
     url: str = "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000"
     api_key: str | None = None
     timeout: float = 10.0
     verify_tls: bool = True
+    enabled: bool = True
+    cluster: str | None = None        # cluster name used in labels / EMS / OptimusDB (default: from topology)
+    swarm_id: str | None = None
+    labels: dict[str, str] = Field(default_factory=dict)   # extra labels for this cluster's samples
+    source: Literal["config", "registered"] = "config"
+    cluster_uid: str | None = None    # kube-system namespace UID, sent at registration
+    registered_at: str | None = None
+    info: dict[str, Any] = Field(default_factory=dict)     # last registration details (nodes, version ...)
+
+    @field_validator("id")
+    @classmethod
+    def _gid(cls, v: str) -> str:
+        if not _ID.fullmatch(v):
+            raise ValueError("gateway id must be lowercase letters, digits, '-' or '_' (max 63)")
+        return v
+
+
+class RegistrationCfg(BaseModel):
+    """Gateways on new k3s hosts announce themselves at POST /api/register."""
+    enabled: bool = True
+    token: str | None = None          # empty -> env REGISTRATION_TOKEN; none at all -> registration refused
+    auto_approve: bool = True         # False -> new gateways are added disabled until approved in the UI
+    stale_after: str | float = "15m"  # no heartbeat for this long -> shown as stale
+
+    def effective_token(self) -> str | None:
+        return self.token or os.getenv("REGISTRATION_TOKEN") or None
 
 
 class UiCfg(BaseModel):
@@ -81,6 +118,7 @@ class CollectorCfg(BaseModel):
     exclude_namespaces: list[str] = Field(default_factory=list)
     metrics: list[str] = Field(default_factory=list)  # whitelist of output names
     aggregate: list[Agg] = Field(default_factory=list)
+    gateways: list[str] | None = None         # None -> every enabled gateway
 
     @field_validator("id")
     @classmethod
@@ -102,16 +140,22 @@ class ClientConfig(BaseModel):
     default_interval: str | float = "30s"
     metric_prefix: str = "swch_k3s_"
     labels: dict[str, str] = Field(default_factory=dict)
-    gateway: GatewayCfg = Field(default_factory=GatewayCfg)
+    gateways: list[GatewayCfg] = Field(default_factory=list)
+    registration: RegistrationCfg = Field(default_factory=RegistrationCfg)
     ui: UiCfg = Field(default_factory=UiCfg)
     persist: PersistCfg = Field(default_factory=PersistCfg)
     plugins: list[str] = Field(default_factory=list)
     sinks: list[SinkCfg] = Field(default_factory=list)
     collectors: list[CollectorCfg] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_gateway(cls, data: Any) -> Any:
+        return normalize_raw(data) if isinstance(data, dict) else data
+
     @model_validator(mode="after")
     def _unique(self):
-        for kind, items in (("sink", self.sinks), ("collector", self.collectors)):
+        for kind, items in (("sink", self.sinks), ("collector", self.collectors), ("gateway", self.gateways)):
             ids = [i.id for i in items]
             dup = {i for i in ids if ids.count(i) > 1}
             if dup:
@@ -121,11 +165,33 @@ class ClientConfig(BaseModel):
             for s in c.sinks or []:
                 if s not in sink_ids:
                     raise ValueError(f"collector '{c.id}' references unknown sink '{s}'")
+        gw_ids = {g.id for g in self.gateways}
+        for c in self.collectors:
+            for g in c.gateways or []:
+                if g not in gw_ids:
+                    raise ValueError(f"collector '{c.id}' references unknown gateway '{g}'")
         parse_duration(self.default_interval)
         return self
 
     def interval_of(self, c: CollectorCfg) -> float:
         return parse_duration(c.interval if c.interval is not None else self.default_interval)
+
+    @property
+    def gateway(self) -> GatewayCfg:
+        """First gateway (backwards compatibility: config persistence, single-cluster setups)."""
+        return self.gateways[0] if self.gateways else GatewayCfg()
+
+
+def normalize_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    """Convert the single ``gateway:`` of v0.1/v0.2 configs into ``gateways: [{id: default, ...}]``.
+
+    Works on raw (unexpanded) dicts too and returns the same dict, modified in place.
+    """
+    gw = raw.pop("gateway", None)
+    if gw and not raw.get("gateways"):
+        raw["gateways"] = [{"id": "default", **gw}]
+    raw.setdefault("gateways", [])
+    return raw
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -134,8 +200,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "metric_prefix": "swch_k3s_",
     "labels": {"swarm_id": "${SWARM_ID:-}", "cluster": "${CLUSTER_NAME:-}",
                "cloud": "${CLOUD:-}", "region": "${REGION:-}", "zone": "${ZONE:-}"},
-    "gateway": {"url": "${GATEWAY_URL:-http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000}",
-                "api_key": "${GATEWAY_API_KEY:-}", "timeout": 10},
+    "gateways": [{"id": "default",
+                  "url": "${GATEWAY_URL:-http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000}",
+                  "api_key": "${GATEWAY_API_KEY:-}", "timeout": 10}],
+    "registration": {"enabled": True, "token": "${REGISTRATION_TOKEN:-}", "auto_approve": True,
+                     "stale_after": "15m"},
     "ui": {"enabled": True, "port": 8090, "username": "admin", "password": "${UI_PASSWORD:-}"},
     "persist": {"mode": "gateway", "path": "/data/client.yaml"},
     "sinks": [
@@ -144,15 +213,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
                      "username": "${EMS_BROKER_USERNAME:-aaa}", "password": "${EMS_BROKER_PASSWORD:-111}",
                      "destination": "/topic/{metric}", "body_format": "ems_event"}},
         {"id": "log", "type": "log", "enabled": False, "options": {"max_lines": 20}},
+        {"id": "optimusdb-trust", "type": "optimusdb_trust", "enabled": False,
+         "options": {"url": "${OPTIMUSDB_URL:-http://193.225.250.240/optimusdb1}", "context": "swarmkb",
+                     "dstype": "kbtrust", "cluster": "${TRUST_CLUSTER:-}", "flush_interval": "60s"}},
     ],
     "collectors": [
         {"id": "nodes", "type": "node_usage", "interval": "30s"},
         {"id": "pods", "type": "pod_usage", "interval": "30s", "exclude_namespaces": ["kube-system"]},
         {"id": "pod-utilisation", "type": "pod_overview", "interval": "60s",
          "exclude_namespaces": ["kube-system"],
-         "metrics": ["pod_cpu_pct_of_limit", "pod_memory_pct_of_limit", "pod_restarts"]},
+         "metrics": ["pod_cpu_pct_of_limit", "pod_memory_pct_of_limit", "pod_restarts", "pod_running"]},
         {"id": "warnings", "type": "events", "interval": "60s", "params": {"type": "Warning"}},
         {"id": "topology", "type": "topology", "interval": "2m"},
+        {"id": "control-plane", "type": "apiserver_health", "interval": "30s"},
     ],
 }
 
@@ -180,7 +253,7 @@ class ConfigStore:
             if p and Path(p).is_file():
                 data = yaml.safe_load(Path(p).read_text()) or {}
                 if isinstance(data, dict) and data:
-                    self.raw, self.source = data, p
+                    self.raw, self.source = normalize_raw(data), p
                     break
         return validate(self.raw)
 
@@ -189,6 +262,7 @@ class ConfigStore:
 
     def save(self, raw: dict[str, Any], gateway_put=None) -> dict[str, Any]:
         """Validate and persist. Returns a report of where it was written."""
+        raw = normalize_raw(raw)
         cfg = validate(raw)
         text = self.to_yaml(raw)
         report: dict[str, Any] = {"file": None, "gateway": None}

@@ -8,10 +8,24 @@ labels:
   cloud: ${CLOUD:-}
   region: ${REGION:-}
   zone: ${ZONE:-}
-gateway:
-  url: ${GATEWAY_URL:-http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000}
-  api_key: ${GATEWAY_API_KEY:-}
-  timeout: 10
+# One entry per k3s cluster (= one k3s Metrics Gateway). Gateways on new hosts can also add
+# themselves through POST /api/register (see registration below and docs/multi-cluster.md).
+gateways:
+  - id: default
+    url: ${GATEWAY_URL:-http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000}
+    api_key: ${GATEWAY_API_KEY:-}
+    timeout: 10
+  # - id: edge-07
+  #   url: http://10.0.0.7/swch-metrics
+  #   api_key: ${EDGE07_KEY:-}
+  #   cluster: edge-07            # name in EMS headers / OptimusDB (default: from the gateway topology)
+  #   swarm_id: swarm-01
+  #   labels: {site: athens-lab}
+registration:
+  enabled: true
+  token: ${REGISTRATION_TOKEN:-}  # empty -> registration refused
+  auto_approve: true              # false -> new gateways added disabled until approved in the UI
+  stale_after: 15m
 ui: {enabled: true, port: 8090, username: admin, password: "${UI_PASSWORD:-}"}
 persist: {mode: gateway, path: /data/client.yaml}
 plugins: []            # e.g. [my_company.swch_collectors] - modules that @register extra collectors/sinks

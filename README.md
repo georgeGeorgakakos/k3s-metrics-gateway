@@ -1,5 +1,15 @@
 <p align="center">
   <img src="https://www.swarmchestrate.eu/wp-content/uploads/2024/04/logo-horizontal.png" alt="Swarmchestrate" height="64">
+  &nbsp;&nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/imu-white.png">
+    <img src="docs/assets/imu.png" alt="IMU · Information Management Unit" height="52">
+  </picture>
+  &nbsp;&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/iccs-white.png">
+    <img src="docs/assets/iccs.png" alt="ICCS · ΕΠΙΣΕΥ" height="72">
+  </picture>
 </p>
 
 <h1 align="center">k3s Metrics Gateway &amp; EMS Metrics Client</h1>
@@ -234,6 +244,57 @@ If the EMS metric model expects `*_SENSOR` topics, open the UI → **Sinks** →
 
 ---
 
+### Gateway and EMS on different hosts
+
+When the workloads (e.g. OptimusDB) run in one k3s cluster and EMS runs in another, render one manifest per host.
+Since v0.3.0 the gateway can also register itself with the EMS sidecar (`--register-url`, `--register-token`), so
+host B needs no `--gateway-url`. See [Many clusters and automatic registration](#many-clusters-and-automatic-registration).
+The sidecar still runs inside the EMS pod and calls the gateway over the network.
+On locked-down VMs, use the k3s Traefik ingress on port 80 (`--expose-gateway ingress`) so no extra ports are needed.
+
+```bash
+# Host A: k3s cluster with the workloads; gateway at http://<HOST_A>/swch-metrics
+python scripts/render_manifest.py --role gateway --swarm-id swarm-01 --expose-gateway ingress \
+  --gateway-url http://<HOST_A>/swch-metrics --api-key <KEY> -o hostA-gateway.yaml
+
+# Host B: EMS; sidecar resources plus the patch, and the UI at http://<HOST_B>/swch-metrics-ui/
+python scripts/render_manifest.py --role ems --namespace <EMS_NAMESPACE> --swarm-id swarm-01 \
+  --gateway-url http://<HOST_A>/swch-metrics --api-key <KEY> --ui-password auto --expose-ui ingress \
+  -o hostB-ems.yaml --patch-output hostB-ems-sidecar-patch.yaml
+```
+
+```bash
+# on host A
+sudo cp hostA-gateway.yaml /var/lib/rancher/k3s/server/manifests/
+
+# on host B
+curl -H "X-API-Key: <KEY>" http://<HOST_A>/swch-metrics/health      # B must reach A on port 80
+kubectl apply -f hostB-ems.yaml
+kubectl -n <EMS_NAMESPACE> patch deployment emsserver-ems-server --patch-file hostB-ems-sidecar-patch.yaml
+```
+
+Use the same `<KEY>` on both hosts. Alternatives:
+- **`--expose-gateway nodeport`:** the gateway listens on port 30800 instead of going through the ingress.
+- **`--ingress-allow-ip <cidr>`:** limits the routes by source IP. Only use it if Traefik sees real client IPs.
+
+With `--role ems`, the configuration saved from the UI is kept on a local PVC in host B's cluster.
+EMS receives host A's topology on the `swch_k3s_topology` topic.
+
+### EMS reachable only through an SSH tunnel (locked-down hosts)
+
+A common Swarmchestrate setup has OptimusDB and EMS on separate VMs, with the EMS VM exposing only SSH.
+OptimusDB then reaches the EMS broker through an `autossh` tunnel on its own VM, which listens on `0.0.0.0:61610`.
+In that case, run everything on the workload host and publish through the same tunnel. No ports are opened, and the EMS host is not changed.
+
+```bash
+python scripts/render_manifest.py --role standalone --swarm-id swarm-01 --cluster-name epm-server \
+  --api-key auto --ui-password auto -o swch-metrics-gateway.yaml
+sudo cp swch-metrics-gateway.yaml /var/lib/rancher/k3s/server/manifests/      # on the workload host
+```
+
+The client runs as its own Deployment (`swch-metrics-client`) and connects to `status.hostIP:61610`, which is the tunnel.
+Use `--ems-broker-host <ip>` if the broker is reachable some other way.
+
 ## What EMS gets
 
 ### Topology (`ConfigMap swch-metrics-topology`, also `GET /topology`)
@@ -303,9 +364,16 @@ The UI never writes to the defaults ConfigMap. k3s re-applies the auto-deploy ma
 | `prometheus` | `/prometheus/query` | the result of any PromQL query |
 | `http_json` | any path | values mapped from JSON fields (`items_path`, `value_field`, `label_fields`) |
 
-Options shared by every collector: `interval`, `enabled`, `sinks` (subset), `include_namespaces`,
-`exclude_namespaces`, `metrics` (whitelist), `aggregate` (`sum|avg|min|max|count` → `<metric>_<op>` with `instance=cluster`)
-and `metric_prefix`.
+Options shared by every collector: `interval`, `enabled`, `sinks` (subset), `gateways` (subset of clusters;
+default all), `include_namespaces`, `exclude_namespaces`, `metrics` (whitelist), `aggregate`
+(`sum|avg|min|max|count` → `<metric>_<op>` with `instance=cluster`, per cluster) and `metric_prefix`.
+
+### Gateways (clusters)
+
+`gateways:` lists one entry per k3s cluster: `id`, `url`, `api_key`, `cluster` (name used in EMS and OptimusDB;
+default from the gateway's topology), `swarm_id`, `labels`, `enabled`. Entries are added by hand, in the UI
+(**Gateways** tab), or by the gateways themselves through `POST /api/register` when `registration.token`
+(env `REGISTRATION_TOKEN`) is set. See [docs/multi-cluster.md](docs/multi-cluster.md).
 
 ### Sink types
 
@@ -315,6 +383,7 @@ and `metric_prefix`.
 | `jsonl` | Appends to a JSON-lines file, with size-based rotation |
 | `webhook` | POSTs each batch as JSON (e.g. to OptimusDB or another ingest endpoint) |
 | `log` | Writes samples to the container log |
+| `optimusdb_trust` | Derives trust attributes **A1 Availability** and **A3 Operational stability** per pod, node and control plane and upserts them into OptimusDB (`kbtrust`). See [docs/trust-optimusdb.md](docs/trust-optimusdb.md) |
 
 The full annotated example is [`deploy/examples/client.full.yaml`](deploy/examples/client.full.yaml).
 
@@ -363,6 +432,7 @@ Interactive OpenAPI docs are served at `/docs`. All endpoints except `/health` n
 | adapters | `/custom-metrics/{path}`, `/external-metrics/{path}` |
 | prometheus | `/prometheus/query`, `/prometheus/query_range`, `/prometheus/targets`, `/prometheus/pods/{preset}` |
 | topology | `/topology`, `/endpoints`, `/capabilities`, `/status` |
+| registration | `GET /registration` (status of the self-registration with EMS), `POST /registration` (register now) |
 | sidecar | `GET/PUT /client-config/{namespace}` |
 | raw | `/raw?path=/api/...` (read-only) |
 
@@ -420,7 +490,58 @@ The image name comes from the repository owner, so the workflow works under the 
 
 ---
 
+## Many clusters and automatic registration
+
+One EMS sidecar polls any number of k3s clusters. A gateway deployed on a new k3s host registers itself with the
+sidecar, and EMS receives that cluster's metrics, labelled with its `cluster`, without any step on the EMS host:
+
+```bash
+# on the new k3s host
+curl -fsSL https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/v0.3.0/deploy/onboard/onboard-k3s-host.sh -o onboard-k3s-host.sh
+sudo REGISTER_URL=http://<ems-host>/swch-metrics-ui/api/register REGISTER_TOKEN=<token> \
+     CLUSTER_NAME=edge-07 SWARM_ID=swarm-01 bash onboard-k3s-host.sh
+```
+
+```mermaid
+sequenceDiagram
+    participant H as New k3s host (gateway)
+    participant S as EMS sidecar (host B)
+    participant E as EMS broker
+    participant O as OptimusDB
+    H->>S: POST /api/register {url, api_key, cluster_name, cluster_uid} (Bearer token)
+    S->>S: add to gateways, save /data/client.yaml, reload
+    loop every collector interval
+        S->>H: GET /swch-metrics/... (X-API-Key)
+        S->>E: STOMP swch_k3s_* (headers cluster, cluster-uid)
+        S->>O: crudput kbtrust trust:<cluster>:... (A1, A3)
+    end
+    loop every 5 min
+        H->>S: POST /api/register (heartbeat)
+    end
+```
+
+See [docs/multi-cluster.md](docs/multi-cluster.md).
+
+## Documentation
+
+| Document | Content |
+|---|---|
+| [docs/multi-cluster.md](docs/multi-cluster.md) | One EMS sidecar for many k3s clusters; automatic gateway registration and onboarding of new hosts |
+| [docs/trust-optimusdb.md](docs/trust-optimusdb.md) | Trust evidence (A1 Availability, A3 Operational stability) persisted in OptimusDB `kbtrust` |
+| [docs/archimate/](docs/archimate/) | ArchiMate 3.1 model (Open Exchange XML for Archi) and the two views as SVG / PNG |
+| [docs/Swarmchestrate_k3s-Metrics-Gateway_E2E-Guide_ICCS_14112026.pptx](docs/Swarmchestrate_k3s-Metrics-Gateway_E2E-Guide_ICCS_14112026.pptx) | End-to-end guide: flow, new deployment, metric list, test commands, UI guide |
+
+> Per-host deployment files rendered with `--api-key auto` / `--ui-password auto` contain secrets.
+> Keep them on the hosts; they are excluded by `.gitignore` (the GitHub web upload ignores `.gitignore`, so do not upload them).
+
+## Contributors
+
+- **George Georgakakos** (IMU, ICCS / NTUA)
+
 ## Acknowledgement
+
+Developed at the **Information Management Unit (IMU)** of the **Institute of Communication and Computer Systems
+(ICCS / ΕΠΙΣΕΥ)**, National Technical University of Athens, within Swarmchestrate.
 
 <img src="https://img.shields.io/badge/-Funded%20by%20the%20European%20Union-003399" alt="EU"> Swarmchestrate is funded by the European Union's
 Horizon Europe programme under grant agreement No. 101135012.

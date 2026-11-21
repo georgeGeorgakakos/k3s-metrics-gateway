@@ -82,7 +82,7 @@ def run(coro):
 
 
 # ------------------------------------------------------------------ config
-@pytest.mark.parametrize("v,s", [("15s", 15), ("1m", 60), ("500ms", .5), ("2h", 7200), (30, 30), ("1.5 min", 90)])
+@pytest.mark.parametrize("v,s", [("7d", 604800), ("15s", 15), ("1m", 60), ("500ms", .5), ("2h", 7200), (30, 30), ("1.5 min", 90)])
 def test_duration(v, s):
     assert C.parse_duration(v) == s
 

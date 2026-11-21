@@ -12,7 +12,8 @@ const fmt = (v, d = 1) => v == null || isNaN(v) ? "–" : Math.abs(v) >= 1000 ? 
 const ago = (iso) => { if (!iso) return "never"; const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? `${Math.max(0, s | 0)}s ago` : s < 3600 ? `${(s / 60) | 0}m ago` : `${(s / 3600) | 0}h ago`; };
 const dur = (s) => s >= 3600 && s % 3600 === 0 ? `${s / 3600}h` : s >= 60 && s % 60 === 0 ? `${s / 60}m` : `${s}s`;
 
-const S = { demo: false, status: null, config: null, ctypes: [], stypes: [], metric: null, hidden: new Set(), topology: null };
+const S = { demo: false, status: null, config: null, ctypes: [], stypes: [], metric: null, hidden: new Set(), topology: null, topoGw: "" };
+const multi = () => (S.status?.gateways || []).length > 1;
 
 /* ------------------------------------------------------------------ API */
 const api = {
@@ -38,18 +39,27 @@ const Demo = {
     for (let i = 60; i > 0; i--) this.tick(Date.now() - i * 5000, true);
     setInterval(() => this.tick(Date.now()), 5000);
   },
+  clusters() { return (this.config.gateways || []).filter((g) => g.enabled !== false).map((g) => ({ ...g, ...(this.data.clusters.find((c) => c.id === g.id) || {}) })); },
   reset() {
     this.states = {};
     for (const c of this.config.collectors) this.states[c.id] = { id: c.id, type: c.type, enabled: c.enabled !== false, interval_s: this.secs(c.interval || this.config.default_interval), runs: 0, failures: 0, last_run: null, last_duration_ms: null, last_count: 0, last_error: null, sink_errors: {}, status: "pending" };
     for (const s of this.config.sinks) this.sinks[s.id] = this.sinks[s.id] || { sent: 0, errors: 0 };
   },
   env(v) { return typeof v === "string" ? v.replace(/\$\{[A-Za-z_][A-Za-z0-9_]*(?::-([^}]*))?\}/g, (_, d) => d || "") : v; },
-  secs(v) { if (typeof v === "number") return v; const m = /^(\d+(?:\.\d+)?)\s*(ms|s|sec|m|min|h)?$/i.exec(String(v).trim()); if (!m) return 30; return +m[1] * ({ ms: .001, s: 1, sec: 1, m: 60, min: 60, h: 3600 }[(m[2] || "s").toLowerCase()]); },
+  secs(v) { if (typeof v === "number") return v; const m = /^(\d+(?:\.\d+)?)\s*(ms|s|sec|m|min|h|d|w)?$/i.exec(String(v).trim()); if (!m) return 30; return +m[1] * ({ ms: .001, s: 1, sec: 1, m: 60, min: 60, h: 3600, d: 86400, w: 604800 }[(m[2] || "s").toLowerCase()]); },
   wave(seed, t, base, amp) { return Math.max(0, base + amp * Math.sin(t / 60000 + seed) + amp * 0.35 * Math.sin(t / 9000 + seed * 3) + (Math.random() - .5) * amp * .25); },
   gen(type, t) {
-    const pre = this.config.metric_prefix ?? "swch_k3s_", nodes = this.data.topology.nodes, out = [];
-    const pods = [["default", "optimusdb-0"], ["default", "optimusdb-1"], ["default", "web-7d9c"], ["swarm-system", "emsserver-ems-server-6f8"], ["default", "resource-agent-5b2"], ["default", "lib-optimiser-77c"]];
-    const add = (m, v, inst, labels) => out.push({ metric: pre + m, value: +v.toFixed(2), instance: inst, labels, timestamp_ms: t });
+    const out = [];
+    this.clusters().forEach((cl, k) => {
+      const lbl = { cluster: cl.cluster, gateway: cl.id, swarm_id: cl.swarm_id || "swarm-demo-01" };
+      for (const s of this.gen1(type, t, cl, k)) out.push({ ...s, labels: { ...lbl, ...s.labels } });
+    });
+    return out;
+  },
+  gen1(type, t, cl, k) {
+    const pre = this.config.metric_prefix ?? "swch_k3s_", nodes = cl.nodes_list || this.data.topology.nodes, out = [];
+    const pods = (cl.pods || [["default", "optimusdb-0"], ["default", "optimusdb-1"], ["default", "web-7d9c"], ["swarm-system", "emsserver-ems-server-6f8"], ["default", "resource-agent-5b2"], ["default", "lib-optimiser-77c"]]);
+    const add = (m, v, inst, labels) => out.push({ metric: pre + m, value: +Math.max(0, v + k * 3).toFixed(2), instance: inst, labels, timestamp_ms: t });
     if (type === "node_usage") nodes.forEach((n, i) => { const c = this.wave(i, t, 35 + i * 12, 14); add("node_cpu_pct", c, n.name, { node: n.name }); add("node_memory_pct", this.wave(i + 9, t, 48 + i * 8, 6), n.name, { node: n.name }); add("node_cpu_millicores", c * 40, n.name, { node: n.name }); });
     if (type === "pod_usage") pods.forEach(([ns, p], i) => { add("pod_cpu_millicores", this.wave(i * 2, t, 80 + i * 45, 50), p, { namespace: ns, pod: p }); add("pod_memory_mib", this.wave(i * 5, t, 120 + i * 60, 12), p, { namespace: ns, pod: p }); });
     if (type === "pod_overview") pods.forEach(([ns, p], i) => { add("pod_cpu_pct_of_limit", this.wave(i, t, 30 + i * 9, 18), p, { namespace: ns, pod: p }); add("pod_memory_pct_of_limit", this.wave(i + 4, t, 40 + i * 6, 5), p, { namespace: ns, pod: p }); add("pod_restarts", i === 2 ? 3 : 0, p, { namespace: ns, pod: p }); });
@@ -71,7 +81,7 @@ const Demo = {
     const st = this.states[c.id], samples = this.gen(c.type, t).map((s) => ({ ...s, collector: c.id, source: (this.data.types.find((x) => x.type === c.type) || {}).endpoint, labels: { ...Object.fromEntries(Object.entries(this.data.labels).filter(([, v]) => v)), ...s.labels } }));
     st.runs++; st.last_run = new Date(t).toISOString(); st.last_count = samples.length; st.last_duration_ms = +(20 + Math.random() * 60).toFixed(1); st.status = "ok";
     for (const s of samples) {
-      const k = s.metric + "|" + s.instance; if (!this.series.has(k)) this.series.set(k, []);
+      const k = s.metric + "|" + (this.clusters().length > 1 ? s.labels.cluster + "/" : "") + s.instance; if (!this.series.has(k)) this.series.set(k, []);
       const arr = this.series.get(k); arr.push([s.timestamp_ms, s.value]); if (arr.length > 360) arr.shift();
       this.recent.push(s);
     }
@@ -90,8 +100,11 @@ const Demo = {
     await new Promise((r) => setTimeout(r, 60));
     if (p === "/api/status") {
       const now = Date.now();
+      const cls = this.clusters(), gws = (this.config.gateways || []).map((g) => { const c = this.data.clusters.find((x) => x.id === g.id) || {}; const on = g.enabled !== false; return { id: g.id, url: this.env(g.url), enabled: on, source: g.source || "config", cluster: g.cluster || c.cluster || g.id, swarm_id: "swarm-demo-01", cluster_uid: c.cluster_uid, ok: on ? true : null, last_ok: on ? new Date(now - 4000).toISOString() : null, error: null, registered_at: g.registered_at || null, last_heartbeat: g.source === "registered" ? new Date(now - (c.hb_ago || 90) * 1000).toISOString() : null, stale: false, summary: c.summary, kubernetes_version: "v1.33.4+k3s1", collectors: on ? this.config.collectors.length : 0, samples_last_run: on ? 40 + 7 * (c.summary?.nodes || 1) : 0, errors: 0, info: g.info || {} }; });
       return { client: this.config.client_name, version: "demo", config_source: "demo (in-browser)", uptime_s: ((now - this.t0) / 1000 + 300) | 0,
-        gateway: { url: this.env(this.config.gateway.url), ok: true }, total_samples: this.total,
+        gateway: { url: gws[0]?.url || null, ok: true, count: gws.length, up: cls.length }, gateways: gws,
+        clusters: { count: gws.length, nodes: cls.reduce((a, c) => a + (c.summary?.nodes || 0), 0), ready: cls.reduce((a, c) => a + (c.summary?.ready || 0), 0) },
+        registration: { enabled: true, token_configured: true, auto_approve: true, stale_after: "15m", path: "api/register" }, total_samples: this.total,
         samples_last_minute: this.recent.filter((s) => s.timestamp_ms > now - 60000).length,
         collectors: Object.values(this.states).map((s) => ({ ...s, status: s.enabled ? s.status : "disabled" })),
         sinks: this.config.sinks.map((s) => ({ id: s.id, type: s.type, enabled: s.enabled !== false, sent: this.sinks[s.id].sent, errors: 0, last_error: null, connected: s.type === "ems_stomp" ? s.enabled !== false : null })),
@@ -106,11 +119,18 @@ const Demo = {
     if (p === "/api/config/validate") return { valid: true };
     if (p === "/api/collector-types") return this.data.types;
     if (p === "/api/sink-types") return this.data.sink_types;
-    if (p === "/api/topology") return this.data.topology;
+    if (p === "/api/topology") { const g = u.searchParams.get("gateway") || this.clusters()[0]?.id, c = this.clusters().find((x) => x.id === g) || {}; return { ...this.data.topology, cluster_name: c.cluster, cluster_id: c.cluster_uid, summary: c.summary || this.data.topology.summary, nodes: c.nodes_list || this.data.topology.nodes, gateway_id: g }; }
+    if (p === "/api/gateways" && method === "GET") return (await this.handle("GET", "api/status")).gateways;
+    const gtest = /^\/api\/gateways\/([^/]+)\/test$/.exec(p);
+    if (gtest) { const c = this.data.clusters.find((x) => x.id === gtest[1]) || {}; return { reachable: true, authorized: true, cluster_name: c.cluster, cluster_uid: c.cluster_uid, nodes: c.summary?.nodes }; }
+    const gen = /^\/api\/gateways\/([^/]+)\/enabled$/.exec(p);
+    if (gen) { const g = this.config.gateways.find((x) => x.id === gen[1]); g.enabled = !!body.enabled; this.reset(); return { id: g.id, enabled: g.enabled }; }
+    const gdel = /^\/api\/gateways\/([^/]+)$/.exec(p);
+    if (gdel && method === "DELETE") { this.config.gateways = this.config.gateways.filter((x) => x.id !== gdel[1]); this.reset(); return { deleted: gdel[1] }; }
     if (p === "/api/metrics") { const idx = {}; for (const k of this.series.keys()) { const [m, i] = k.split("|"); (idx[m] = idx[m] || []).push(i); } return Object.keys(idx).sort().map((m) => ({ metric: m, instances: idx[m] })); }
     if (p === "/api/series") { const m = u.searchParams.get("metric"); return [...this.series.entries()].filter(([k]) => k.startsWith(m + "|")).map(([k, pts]) => ({ instance: k.split("|")[1], points: pts })).sort((a, b) => b.points.at(-1)[1] - a.points.at(-1)[1]).slice(0, 6); }
-    if (p === "/api/samples") { const c = u.searchParams.get("collector"), q = (u.searchParams.get("q") || "").toLowerCase(); return this.recent.slice().reverse().filter((s) => (!c || s.collector === c) && (!q || JSON.stringify(s).toLowerCase().includes(q))).slice(0, 200); }
-    const run = /^\/api\/collectors\/(.+)\/run$/.exec(p);
+    if (p === "/api/samples") { const c = u.searchParams.get("collector"), cl = u.searchParams.get("cluster"), q = (u.searchParams.get("q") || "").toLowerCase(); return this.recent.slice().reverse().filter((s) => (!c || s.collector === c) && (!cl || s.labels.cluster === cl) && (!q || JSON.stringify(s).toLowerCase().includes(q))).slice(0, 200); }
+    const run = /^\/api\/collectors\/([^/?]+)\/run$/.exec(p);
     if (run) { const c = this.config.collectors.find((x) => x.id === run[1]); const s = this.run(c); return { collector: c.id, count: s.length, samples: s }; }
     throw new Error("demo: unsupported " + p);
   },
@@ -130,21 +150,32 @@ async function saveConfig(cfg, label = "Configuration") {
 /* ------------------------------------------------------------------ rendering */
 function renderHeader(st) {
   const gw = $("#pill-gw"), ems = $("#pill-ems");
-  gw.className = "pill " + (st.gateway.ok ? "ok" : st.gateway.ok === false ? "err" : ""); gw.title = st.gateway.url;
+  const gws = st.gateways || [], on = gws.filter((g) => g.enabled), up = on.filter((g) => g.ok).length;
+  gw.className = "pill " + (!on.length ? "" : up === on.length ? "ok" : up ? "warn" : "err");
+  gw.title = gws.map((g) => `${g.cluster}: ${g.enabled ? (g.ok ? "up" : g.error || "down") : "disabled"}`).join("\n") || "no gateway registered yet";
+  $("#pill-gw-text").textContent = gws.length > 1 ? `Gateways ${up}/${on.length}` : "Gateway";
   const e = st.sinks.find((s) => s.type === "ems_stomp" && s.enabled);
   ems.className = "pill " + (!e ? "" : e.connected ? "ok" : e.connected === false || e.last_error ? "err" : ""); ems.title = e ? (e.last_error || "connected") : "no EMS sink enabled";
-  const t = st.topology || {}, sm = t.summary || {};
-  $("#hero-title").textContent = t.swarm_id || t.cluster_id?.slice(0, 8) || st.client || "k3s cluster";
-  $("#hero-eyebrow").textContent = t.swarm_id ? "Swarm · k3s cluster" : "k3s cluster";
-  $("#hero-meta").innerHTML = [["Cluster ID", t.cluster_id ? t.cluster_id.slice(0, 13) + "…" : "–"], ["Zones", (sm.zones || []).join(", ") || "–"], ["Clouds", (sm.clouds || []).join(", ") || "–"], ["Gateway", st.gateway.url]].map(([k, v]) => `<span>${k}: <b>${esc(v)}</b></span>`).join("");
-  $("#hero-stats").innerHTML = [[`${sm.ready ?? "–"}/${sm.nodes ?? "–"}`, "Nodes ready"], [st.collectors.filter((c) => c.enabled).length, "Collectors"], [fmt(st.samples_last_minute, 0), "Samples / min"]].map(([v, l]) => `<div class="hero-stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+  const t = st.topology || {}, sm = t.summary || {}, cl = st.clusters || {};
+  if (gws.length > 1) {
+    const swarms = [...new Set(gws.map((g) => g.swarm_id).filter(Boolean))];
+    $("#hero-title").textContent = `${gws.length} k3s clusters`;
+    $("#hero-eyebrow").textContent = swarms.length ? `Swarm ${swarms.join(", ")} · EMS sidecar` : "EMS sidecar";
+    $("#hero-meta").innerHTML = gws.map((g) => `<span><i class="dot" style="background:${g.ok ? "#13a89e" : g.enabled ? "#d6453d" : "#aab3c2"}"></i> <b>${esc(g.cluster)}</b> ${g.summary ? `${g.summary.ready}/${g.summary.nodes} nodes` : ""}</span>`).join("");
+  } else {
+    $("#hero-title").textContent = t.cluster_name || t.swarm_id || t.cluster_id?.slice(0, 8) || (gws.length ? st.client : "Waiting for a gateway");
+    $("#hero-eyebrow").textContent = t.swarm_id ? `Swarm ${t.swarm_id} · k3s cluster` : "k3s cluster";
+    $("#hero-meta").innerHTML = [["Cluster ID", t.cluster_id ? t.cluster_id.slice(0, 13) + "…" : "–"], ["Zones", (sm.zones || []).join(", ") || "–"], ["Clouds", (sm.clouds || []).join(", ") || "–"], ["Gateway", st.gateway.url || "none yet: see Gateways"]].map(([k, v]) => `<span>${k}: <b>${esc(v)}</b></span>`).join("");
+  }
+  $("#hero-stats").innerHTML = [[`${cl.ready ?? sm.ready ?? "–"}/${cl.nodes ?? sm.nodes ?? "–"}`, "Nodes ready"], [gws.length, gws.length === 1 ? "Cluster" : "Clusters"], [st.collectors.filter((c) => c.enabled).length, "Collectors"], [fmt(st.samples_last_minute, 0), "Samples / min"]].map(([v, l]) => `<div class="hero-stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
   $("#version").textContent = `v${st.version} · ${st.client} · up ${dur(Math.round(st.uptime_s / 60) * 60 || 60)}`;
 }
 
 function renderKpis(st) {
   const ems = st.sinks.filter((s) => s.type === "ems_stomp").reduce((a, s) => a + s.sent, 0);
   const errs = st.collectors.filter((c) => c.last_error).length + st.sinks.filter((s) => s.last_error).length;
-  const k = [["Nodes ready", `${st.topology?.summary?.ready ?? "–"}<small>/${st.topology?.summary?.nodes ?? "–"}</small>`, "teal", "from topology"],
+  const gws = st.gateways || [], up = gws.filter((g) => g.ok).length;
+  const k = [["Clusters", `${up}<small>/${gws.filter((g) => g.enabled).length}</small>`, "teal", `${st.clusters?.ready ?? "–"}/${st.clusters?.nodes ?? "–"} nodes ready`],
     ["Active collectors", st.collectors.filter((c) => c.enabled).length, "", `${st.collectors.length} configured`],
     ["Samples / minute", fmt(st.samples_last_minute, 0), "navy", `${fmt(st.total_samples, 0)} total`],
     ["Sent to EMS", fmt(ems, 0), "amber", "STOMP messages"],
@@ -156,7 +187,7 @@ const badge = (s) => `<span class="badge ${s}">${s}</span>`;
 
 function renderDashTables(st) {
   $("#dash-collectors").innerHTML = `<tr><th>Collector</th><th>Interval</th><th>Last run</th><th class="num">Samples</th><th>Status</th></tr>` +
-    st.collectors.map((c) => `<tr><td><b>${esc(c.id)}</b> <span class="badge type">${esc(c.type)}</span></td><td>${dur(c.interval_s)}</td><td>${ago(c.last_run)}</td><td class="num">${c.last_count}</td><td>${badge(c.status)}${c.last_error ? `<div class="err-text">${esc(c.last_error)}</div>` : ""}</td></tr>`).join("");
+    st.collectors.map((c) => `<tr><td><b>${esc(c.id)}</b> <span class="badge type">${esc(c.type)}</span>${(c.per_gateway || []).length > 1 ? ` <span class="muted">× ${c.per_gateway.length} clusters</span>` : ""}</td><td>${dur(c.interval_s)}</td><td>${ago(c.last_run)}</td><td class="num">${c.last_count}</td><td>${badge(c.status)}${c.last_error ? `<div class="err-text">${esc(c.last_error)}</div>` : ""}</td></tr>`).join("");
   $("#dash-sinks").innerHTML = st.sinks.map((s) => `<div class="sink"><div><div class="n">${esc(s.id)} <span class="badge type">${esc(s.type)}</span></div><div class="m">${s.enabled ? (s.last_error ? `<span class="err-text">${esc(s.last_error)}</span>` : s.connected === false ? "disconnected" : "healthy") : "disabled"}</div></div><div><div class="c">${fmt(s.sent, 0)}</div><div class="m">sent · ${s.errors} errors</div></div></div>`).join("") || `<div class="empty">No sinks configured</div>`;
 }
 
@@ -166,7 +197,7 @@ function renderCollectorsTable() {
     <td><label class="switch"><input type="checkbox" data-toggle="${i}" ${c.enabled !== false ? "checked" : ""}><span></span></label></td>
     <td><b>${esc(c.id)}</b><div class="muted">${esc((S.ctypes.find((t) => t.type === c.type) || {}).title || "")}</div></td>
     <td><span class="badge type">${esc(c.type)}</span></td><td>${esc(c.interval || S.config.default_interval)}</td>
-    <td>${esc((c.sinks || ["all"]).join(", "))}</td><td>${ago(s.last_run)} · ${s.last_count ?? 0}</td>
+    <td>${esc((c.sinks || ["all"]).join(", "))}<div class="muted">gateways: ${esc((c.gateways || ["all"]).join(", "))}</div></td><td>${ago(s.last_run)} · ${s.last_count ?? 0}</td>
     <td>${badge(s.status || "pending")}${s.last_error ? `<div class="err-text">${esc(s.last_error)}</div>` : ""}</td>
     <td class="actions-cell"><button class="btn sm" data-run="${esc(c.id)}">Run now</button> <button class="btn sm" data-edit="${i}">Edit</button> <button class="btn sm danger" data-del="${i}">Delete</button></td></tr>`; }).join("");
   $("#collectors-table").innerHTML = `<tr><th></th><th>ID</th><th>Type</th><th>Interval</th><th>Sinks</th><th>Last run</th><th>Status</th><th></th></tr>` + (rows || `<tr><td colspan="8" class="empty">No collectors yet.</td></tr>`);
@@ -176,14 +207,56 @@ function renderCollectorsTable() {
 function renderSinksTable() {
   const st = Object.fromEntries((S.status?.sinks || []).map((s) => [s.id, s]));
   $("#sinks-table").innerHTML = `<tr><th></th><th>ID</th><th>Type</th><th>Target</th><th class="num">Sent</th><th>Status</th><th></th></tr>` + S.config.sinks.map((s, i) => {
-    const o = s.options || {}, x = st[s.id] || {}, target = s.type === "ems_stomp" ? `${o.host}:${o.port} ${o.destination || ""}` : o.url || o.path || "container log";
+    const o = s.options || {}, x = st[s.id] || {}, target = s.type === "ems_stomp" ? `${o.host}:${o.port} ${o.destination || ""}` : s.type === "optimusdb_trust" ? `${o.url || ""}/${o.context || "swarmkb"}/command → ${o.dstype || "kbtrust"}` : o.url || o.path || "container log";
     return `<tr><td><label class="switch"><input type="checkbox" data-stoggle="${i}" ${s.enabled !== false ? "checked" : ""}><span></span></label></td><td><b>${esc(s.id)}</b></td><td><span class="badge type">${esc(s.type)}</span></td><td><code>${esc(target)}</code></td><td class="num">${fmt(x.sent ?? 0, 0)}</td><td>${x.last_error ? `<span class="err-text">${esc(x.last_error)}</span>` : s.enabled === false ? badge("disabled") : badge("ok")}</td><td class="actions-cell"><button class="btn sm" data-sedit="${i}">Edit</button> <button class="btn sm danger" data-sdel="${i}">Delete</button></td></tr>`;
   }).join("");
 }
 
+function renderGateways() {
+  const st = S.status || {}, gws = st.gateways || [], reg = st.registration || {};
+  const state = (g) => !g.enabled ? (g.source === "registered" && !g.ok ? "pending-approval" : "disabled") : g.stale ? "stale" : g.ok ? "ok" : g.ok === false ? "error" : "pending";
+  $("#gateways-table").innerHTML = `<tr><th></th><th>Cluster</th><th>Gateway URL</th><th>Source</th><th>Nodes</th><th>Last heartbeat</th><th class="num">Samples</th><th>Status</th><th></th></tr>` + (gws.map((g) => `<tr>
+    <td><label class="switch"><input type="checkbox" data-gtoggle="${esc(g.id)}" ${g.enabled ? "checked" : ""}><span></span></label></td>
+    <td><b>${esc(g.cluster)}</b><div class="muted">id ${esc(g.id)}${g.swarm_id ? " · " + esc(g.swarm_id) : ""}</div></td>
+    <td><span class="gw-url">${esc(g.url)}</span>${g.cluster_uid ? `<div class="muted">uid ${esc(String(g.cluster_uid).slice(0, 13))}…</div>` : ""}</td>
+    <td>${badge(g.source)}${g.registered_at ? `<div class="muted">${ago(g.registered_at)}</div>` : ""}</td>
+    <td>${g.summary ? `${g.summary.ready}/${g.summary.nodes} ready` : (g.info?.nodes ? `${g.info.nodes_ready ?? "?"}/${g.info.nodes}` : "–")}<div class="muted">${esc(g.kubernetes_version || g.info?.kubernetes_version || "")}</div></td>
+    <td>${g.source === "registered" ? ago(g.last_heartbeat) : "–"}</td>
+    <td class="num">${fmt(g.samples_last_run, 0)}</td>
+    <td>${badge(state(g))}${g.error ? `<div class="err-text">${esc(g.error)}</div>` : ""}${g.errors ? `<div class="err-text">${g.errors} collector error(s)</div>` : ""}</td>
+    <td class="actions-cell"><button class="btn sm" data-gtest="${esc(g.id)}">Test</button> <button class="btn sm" data-gedit="${esc(g.id)}">Edit</button> <button class="btn sm danger" data-gdel="${esc(g.id)}">Delete</button></td></tr>`).join("")
+    || `<tr><td colspan="9" class="empty">No gateway yet. Gateways on new k3s hosts register themselves here (see below), or add one manually.</td></tr>`);
+  const url = new URL(reg.path || "api/register", location.href).href;
+  $("#reg-badge").innerHTML = badge(reg.enabled && reg.token_configured ? "ok" : "disabled");
+  $("#reg-info").innerHTML = [["Endpoint", `<code>POST ${esc(url)}</code>`], ["Token", reg.token_configured ? "configured (REGISTRATION_TOKEN)" : "<span class='err-text'>not set: registration refused</span>"],
+    ["New gateways", reg.auto_approve ? "enabled immediately" : "added disabled, waiting for approval"], ["Stale after", esc(reg.stale_after || "15m") + " without heartbeat"]].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  $("#onboard-cmd").textContent = `curl -fsSL https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/v${(st.version || "0.3.0").replace("demo", "0.3.0")}/deploy/onboard/onboard-k3s-host.sh -o onboard-k3s-host.sh\nsudo REGISTER_URL=${url} \\\n     REGISTER_TOKEN=<token> \\\n     CLUSTER_NAME=<unique-name> SWARM_ID=<swarm> \\\n     bash onboard-k3s-host.sh`;
+}
+
+function gatewayForm(existing) {
+  const g = existing ? clone(existing) : { id: "", url: "http://<host>/swch-metrics", enabled: true };
+  openModal(existing ? `Edit gateway · ${existing.id}` : "Add gateway", [
+    field("id", { type: "string", required: true, description: "lowercase, digits, - or _" }, g.id, "ID"),
+    field("url", { type: "string", required: true, description: "As reachable from this EMS host, e.g. http://10.0.0.7/swch-metrics" }, g.url, "Gateway URL", true),
+    field("api_key", { type: "secret", description: "X-API-Key of that gateway (${ENV} allowed)" }, g.api_key, "API key"),
+    field("cluster", { type: "string", description: "Name used in EMS headers and OptimusDB (empty = from the gateway's topology)" }, g.cluster, "Cluster name"),
+    field("swarm_id", { type: "string" }, g.swarm_id, "Swarm ID"),
+    field("enabled", { type: "boolean" }, g.enabled !== false, "Enabled"),
+    field("labels", { type: "json", description: "Extra labels for this cluster's samples, e.g. {\"site\": \"lab\"}" }, g.labels || {}, "Labels", true),
+  ].join(""), async (root) => {
+    const out = { ...g, id: readField(root, "id", { type: "string" }), url: readField(root, "url", { type: "string" }), enabled: readField(root, "enabled", { type: "boolean" }), labels: readField(root, "labels", { type: "json" }) };
+    for (const k of ["api_key", "cluster", "swarm_id"]) { const v = readField(root, k, { type: "string" }); if (v) out[k] = v; else delete out[k]; }
+    const cfg = clone(S.config); cfg.gateways = cfg.gateways || [];
+    const idx = existing ? cfg.gateways.findIndex((x) => x.id === existing.id) : -1;
+    if (!existing && cfg.gateways.some((x) => x.id === out.id)) throw new Error(`gateway id '${out.id}' already exists`);
+    if (idx >= 0) cfg.gateways[idx] = out; else cfg.gateways.push(out);
+    await saveConfig(cfg, `Gateway ${out.id}`);
+  });
+}
+
 function renderTopology(t) {
   if (!t) { $("#topo-diagram").innerHTML = `<div class="empty">Topology not available yet.</div>`; return; }
-  $("#topo-hash").textContent = `hash ${t.hash || "–"} · updated ${ago(t.updated_at)}`;
+  $("#topo-hash").textContent = `${t.cluster_name ? t.cluster_name + " · " : ""}hash ${t.hash || "–"} · updated ${ago(t.updated_at)}`;
   const zones = {}; for (const n of t.nodes || []) (zones[n.zone || n.region || "default zone"] ||= []).push(n);
   const pct = (a, b) => (b ? Math.min(100, (100 * a) / b) : 0);
   $("#topo-diagram").innerHTML = Object.entries(zones).map(([z, ns]) => `<div class="zone"><div class="zt">${esc(z)}${ns[0].cloud ? " · " + esc(ns[0].cloud) : ""}</div>` + ns.map((n) => {
@@ -199,10 +272,10 @@ function renderTopology(t) {
 }
 
 async function renderSamples() {
-  const c = $("#sample-collector").value, q = $("#sample-filter").value;
-  const rows = await api.get(`api/samples?limit=200${c ? "&collector=" + encodeURIComponent(c) : ""}${q ? "&q=" + encodeURIComponent(q) : ""}`);
-  $("#samples-table").innerHTML = `<tr><th>Time</th><th>Metric</th><th>Instance</th><th class="num">Value</th><th>Labels</th><th>Collector</th></tr>` +
-    (rows.map((s) => `<tr><td>${new Date(s.timestamp_ms).toLocaleTimeString()}</td><td>${esc(s.metric)}</td><td>${esc(s.instance || "")}</td><td class="num">${fmt(s.value, 2)}</td><td>${esc(Object.entries(s.labels || {}).filter(([k]) => !["swarm_id", "cloud", "region", "zone", "cluster"].includes(k)).map(([k, v]) => `${k}=${v}`).join(" "))}</td><td>${esc(s.collector)}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">No samples yet.</td></tr>`);
+  const c = $("#sample-collector").value, cl = $("#sample-cluster").value, q = $("#sample-filter").value;
+  const rows = await api.get(`api/samples?limit=200${c ? "&collector=" + encodeURIComponent(c) : ""}${cl ? "&cluster=" + encodeURIComponent(cl) : ""}${q ? "&q=" + encodeURIComponent(q) : ""}`);
+  $("#samples-table").innerHTML = `<tr><th>Time</th><th>Cluster</th><th>Metric</th><th>Instance</th><th class="num">Value</th><th>Labels</th><th>Collector</th></tr>` +
+    (rows.map((s) => `<tr><td>${new Date(s.timestamp_ms).toLocaleTimeString()}</td><td><span class="cluster-tag">${esc(s.labels?.cluster || "–")}</span></td><td>${esc(s.metric)}</td><td>${esc(s.instance || "")}</td><td class="num">${fmt(s.value, 2)}</td><td>${esc(Object.entries(s.labels || {}).filter(([k]) => !["swarm_id", "cloud", "region", "zone", "cluster", "cluster_uid", "gateway"].includes(k)).map(([k, v]) => `${k}=${v}`).join(" "))}</td><td>${esc(s.collector)}</td></tr>`).join("") || `<tr><td colspan="7" class="empty">No samples yet.</td></tr>`);
 }
 
 function renderConfigViews() {
@@ -212,7 +285,6 @@ function renderConfigViews() {
     field("client_name", { type: "string", description: "Shown in EMS headers as 'producer'" }, c.client_name, "Client name"),
     field("default_interval", { type: "string", description: "Used when a collector has no interval (e.g. 30s, 1m)" }, c.default_interval, "Default interval"),
     field("metric_prefix", { type: "string", description: "Prepended to every metric/topic name" }, c.metric_prefix, "Metric prefix"),
-    field("gateway_url", { type: "string", description: "k3s Metrics Gateway URL" }, c.gateway?.url, "Gateway URL"),
     field("labels", { type: "json", description: "Static labels added to every sample (swarm_id, cloud, region, zone…). ${ENV} placeholders allowed." }, c.labels || {}, "Static labels", true),
   ].join("");
   $("#persist-info").innerHTML = [["Mode", c.persist?.mode || "gateway"], ["File", c.persist?.path || "/data/client.yaml"], ["Loaded from", S.status?.config_source || "–"]].map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
@@ -226,6 +298,7 @@ function field(name, spec, value, label, full) {
   if (spec.enum) input = `<select id="${id}" name="${name}">${spec.enum.map((o) => `<option value="${esc(o)}" ${o === (v ?? "") ? "selected" : ""}>${esc(o || "(any)")}</option>`).join("")}</select>`;
   else if (t === "boolean") input = `<label class="switch"><input type="checkbox" id="${id}" name="${name}" ${v ? "checked" : ""}><span></span></label>`;
   else if (t === "integer") input = `<input type="number" id="${id}" name="${name}" value="${esc(v ?? "")}">`;
+  else if (t === "number") input = `<input type="number" step="any" id="${id}" name="${name}" value="${esc(v ?? "")}">`;
   else if (t === "json") input = `<textarea id="${id}" name="${name}" rows="3">${esc(typeof v === "string" ? v : JSON.stringify(v ?? {}, null, 0))}</textarea>`;
   else if (t === "list") input = `<input type="text" id="${id}" name="${name}" value="${esc((v || []).join(", "))}" placeholder="comma separated">`;
   else input = `<input type="${t === "secret" ? "password" : "text"}" id="${id}" name="${name}" value="${esc(v ?? "")}">`;
@@ -235,6 +308,7 @@ function readField(root, name, spec) {
   const el = root.querySelector(`[name="${name}"]`); if (!el) return undefined;
   if (spec.type === "boolean") return el.checked;
   if (spec.type === "integer") return el.value === "" ? null : parseInt(el.value, 10);
+  if (spec.type === "number") return el.value === "" ? null : parseFloat(el.value);
   if (spec.type === "list") return el.value.split(",").map((s) => s.trim()).filter(Boolean);
   if (spec.type === "json") { const s = el.value.trim(); if (!s) return {}; try { return JSON.parse(s); } catch { throw new Error(`${name}: invalid JSON`); } }
   return el.value === "" ? null : el.value;
@@ -377,6 +451,8 @@ async function refresh() {
     renderHeader(S.status); renderKpis(S.status); renderDashTables(S.status);
     const tab = currentTab();
     if (tab === "collectors" || tab === "sinks") { renderCollectorsTable(); renderSinksTable(); }
+    if (tab === "gateways") renderGateways();
+    fillClusterSelects();
     if (tab === "dashboard") { await loadMetrics(); await loadChart(); }
     if (tab === "samples" && !$("#sample-filter").matches(":focus")) await renderSamples();
   } catch (e) { $("#pill-gw").className = "pill err"; console.error(e); }
@@ -384,7 +460,7 @@ async function refresh() {
 const currentTab = () => (location.hash || "#dashboard").slice(1);
 function showTab() {
   const t = currentTab(); $$(".view").forEach((v) => (v.hidden = v.id !== "view-" + t)); $$("#tabs a").forEach((a) => a.classList.toggle("active", a.dataset.tab === t));
-  if (t === "topology") api.get("api/topology").then((d) => renderTopology((S.topology = d))).catch(() => renderTopology(null));
+  if (t === "topology") loadTopology();
   if (t === "settings") renderConfigViews();
   refresh();
 }
@@ -395,6 +471,16 @@ function bind() {
   $("#legend").onclick = (e) => { const b = e.target.closest("button"); if (!b) return; const i = b.dataset.inst; S.hidden.has(i) ? S.hidden.delete(i) : S.hidden.add(i); b.classList.toggle("off"); Chart.draw(); };
   $("#add-collector").onclick = () => collectorForm(null);
   $("#add-sink").onclick = () => sinkForm(null);
+  $("#add-gateway").onclick = () => gatewayForm(null);
+  $("#topo-gateway").onchange = (e) => { S.topoGw = e.target.value; loadTopology(); };
+  $("#sample-cluster").onchange = renderSamples;
+  $("#gateways-table").onclick = async (e) => {
+    const d = e.target.dataset;
+    if (d.gedit) gatewayForm((S.config.gateways || []).find((g) => g.id === d.gedit));
+    if (d.gdel && confirm(`Remove gateway '${d.gdel}'? (a registered gateway re-registers at its next heartbeat unless it is switched off on its host)`)) { try { await api.call("DELETE", `api/gateways/${encodeURIComponent(d.gdel)}`); S.config = (await api.get("api/config")).config; toast(`Gateway ${d.gdel} removed.`); refresh(); } catch (x) { toast(errText(x), true); } }
+    if (d.gtest) { e.target.disabled = true; try { const r = await api.post(`api/gateways/${encodeURIComponent(d.gtest)}/test`); toast(r.reachable && r.authorized && !r.error ? `${d.gtest}: reachable · cluster ${r.cluster_name || "?"} · ${r.nodes ?? "?"} nodes` : `${d.gtest}: ${r.error || "unreachable"}`, !!r.error); } catch (x) { toast(errText(x), true); } e.target.disabled = false; }
+  };
+  $("#gateways-table").onchange = async (e) => { const id = e.target.dataset.gtoggle; if (!id) return; try { await api.post(`api/gateways/${encodeURIComponent(id)}/enabled`, { enabled: e.target.checked }); S.config = (await api.get("api/config")).config; toast(`Gateway ${id} ${e.target.checked ? "enabled" : "disabled"}.`); refresh(); } catch (x) { toast(errText(x), true); } };
   $("#collector-types").onclick = (e) => { const t = e.target.dataset.addtype; if (t) collectorForm(null, t); };
   $("#collectors-table").onclick = async (e) => {
     const d = e.target.dataset;
@@ -415,7 +501,6 @@ function bind() {
       c.client_name = readField(f, "client_name", { type: "string" }) || c.client_name;
       c.default_interval = readField(f, "default_interval", { type: "string" }) || "30s";
       c.metric_prefix = readField(f, "metric_prefix", { type: "string" }) ?? "";
-      c.gateway = { ...c.gateway, url: readField(f, "gateway_url", { type: "string" }) || c.gateway.url };
       c.labels = readField(f, "labels", { type: "json" });
       await saveConfig(c, "General settings");
     } catch (e) { toast(errText(e), true); }
@@ -426,6 +511,22 @@ function bind() {
   $("#sample-filter").oninput = () => { clearTimeout(window._sf); window._sf = setTimeout(renderSamples, 250); };
   $("#sample-collector").onchange = renderSamples;
   Chart.bind();
+}
+
+function fillClusterSelects() {
+  const gws = (S.status?.gateways || []).filter((g) => g.enabled);
+  const tsel = $("#topo-gateway"), ssel = $("#sample-cluster");
+  const tv = S.topoGw || gws[0]?.id || "", sv = ssel.value;
+  const topts = gws.map((g) => `<option value="${esc(g.id)}" ${g.id === tv ? "selected" : ""}>${esc(g.cluster)}</option>`).join("");
+  if (tsel.innerHTML !== topts) tsel.innerHTML = topts;
+  tsel.hidden = gws.length < 2;
+  const sopts = `<option value="">All clusters</option>` + [...new Set(gws.map((g) => g.cluster))].map((c) => `<option ${c === sv ? "selected" : ""}>${esc(c)}</option>`).join("");
+  if (ssel.innerHTML !== sopts) ssel.innerHTML = sopts;
+  ssel.hidden = gws.length < 2;
+}
+function loadTopology() {
+  const g = S.topoGw || "";
+  api.get("api/topology" + (g ? "?gateway=" + encodeURIComponent(g) : "")).then((d) => renderTopology((S.topology = d))).catch(() => renderTopology(null));
 }
 
 async function boot() {

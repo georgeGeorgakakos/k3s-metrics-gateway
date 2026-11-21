@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: swch-metrics-client
-          image: ghcr.io/georgegeorgakakos/k3s-metrics-gateway:0.1.0
+          image: ghcr.io/georgegeorgakakos/k3s-metrics-gateway:0.3.0
           command: ["swch-metrics-client"]
           ports: [{name: ui, containerPort: 8090}]
           envFrom: [{configMapRef: {name: swch-cluster-identity, optional: true}}]
