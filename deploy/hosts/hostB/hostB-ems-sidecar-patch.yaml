@@ -1,0 +1,123 @@
+# v0.3.1 strategic-merge patch for the EMS Deployment on host B (namespace default).
+# swch-metrics-client sidecar v0.3.1: many gateways + self-registration (REGISTRATION_TOKEN),
+# OptimusDB trust sink, and the EMS fixes of 17 Nov (Recreate, ems-server liveness 180 s).
+#   sudo k3s kubectl -n default patch deployment emsserver-ems-server --patch-file hostB-ems-sidecar-patch.yaml
+metadata:
+  annotations:
+    swarmchestrate.eu/metrics-sidecar: attached
+spec:
+  template:
+    metadata:
+      annotations:
+        swarmchestrate.eu/metrics-sidecar: attached
+    spec:
+      containers:
+      - name: swch-metrics-client
+        image: ghcr.io/georgegeorgakakos/k3s-metrics-gateway:0.3.1
+        imagePullPolicy: IfNotPresent
+        command:
+        - swch-metrics-client
+        ports:
+        - name: swch-ui
+          containerPort: 8090
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: swch-cluster-identity
+            optional: true
+        env:
+        - name: CONFIG_PATH
+          value: /etc/swch/client.yaml
+        - name: GATEWAY_URL
+          value: http://193.225.250.240/swch-metrics
+        - name: EMS_BROKER_HOST
+          value: localhost
+        - name: OPTIMUSDB_URL
+          value: http://193.225.250.240/optimusdb1
+        - name: TRUST_CLUSTER
+          value: epm-server
+        - name: GATEWAY_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: swch-metrics-gateway-auth
+              key: API_KEY
+              optional: true
+        - name: UI_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: swch-metrics-gateway-auth
+              key: UI_PASSWORD
+              optional: true
+        - name: REGISTRATION_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: swch-metrics-gateway-auth
+              key: REGISTRATION_TOKEN
+              optional: true
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        volumeMounts:
+        - name: swch-client-config
+          mountPath: /etc/swch
+          readOnly: true
+        - name: swch-client-config-saved
+          mountPath: /etc/swch-saved
+          readOnly: true
+        - name: swch-client-data
+          mountPath: /data
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8090
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8090
+          periodSeconds: 30
+          failureThreshold: 5
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 300m
+            memory: 192Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+            - ALL
+      - name: ems-server
+        livenessProbe:
+          initialDelaySeconds: 180
+          periodSeconds: 20
+          failureThreshold: 6
+      volumes:
+      - name: swch-client-config
+        configMap:
+          name: swch-metrics-client-config
+          optional: true
+      - name: swch-client-config-saved
+        configMap:
+          name: swch-metrics-client-config-saved
+          optional: true
+      - name: swch-client-data
+        persistentVolumeClaim:
+          claimName: swch-metrics-client-data
+  strategy:
+    type: Recreate
+    rollingUpdate: null

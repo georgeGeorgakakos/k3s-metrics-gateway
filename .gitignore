@@ -15,3 +15,5 @@ hostA-optimusdb.zip
 hostB-ems.zip
 *-secret*.yaml
 backup/
+# ...except the versioned host scripts (no secrets: they read keys from the per-host files on the hosts)
+!deploy/hosts/hostB/hostB-ems-sidecar-patch.yaml

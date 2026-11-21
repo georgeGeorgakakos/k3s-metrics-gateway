@@ -39,11 +39,52 @@ flowchart TB
 All traffic is plain HTTP on **port 80** through the k3s Traefik ingress (plus SSH :22 for the existing autossh
 tunnel). No other port has to be opened.
 
+### Files in this repository
+
+| File | Runs on | Used in |
+|------|---------|---------|
+| [`deploy/hosts/hostB/`](../deploy/hosts/) `upgrade-hostB.sh`, `hostB-ems-sidecar-patch.yaml`, `check-trust.sh` | host B (EMS) | section 0 |
+| [`deploy/hosts/hostA/upgrade-hostA.sh`](../deploy/hosts/hostA/upgrade-hostA.sh) | host A | section 0 |
+| [`deploy/onboard/make-autoregister-manifest.sh`](../deploy/onboard/make-autoregister-manifest.sh) | host B, once | section 1 (zero-touch) |
+| [`deploy/onboard/cloud-init-k3s-swch.yaml`](../deploy/onboard/cloud-init-k3s-swch.yaml) | new VM (user-data) | section 1 |
+| [`deploy/onboard/onboard-k3s-host.sh`](../deploy/onboard/onboard-k3s-host.sh) | new host | section 2 (one command) |
+| [`deploy/onboard/e2e-check.sh`](../deploy/onboard/e2e-check.sh) | host B | sections 1–3 |
+| [`deploy/k3s/swch-metrics-gateway-onboard.yaml`](../deploy/k3s/swch-metrics-gateway-onboard.yaml) | (used by the scripts) | sections 1–2 |
+
+The `deploy/onboard` files are also attached to every GitHub release. Get them onto host B with:
+
+```bash
+cd /opt/iccs/Scripts/SetupK3sMetric
+B=https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/main/deploy
+for f in hosts/hostB/upgrade-hostB.sh hosts/hostB/hostB-ems-sidecar-patch.yaml hosts/hostB/check-trust.sh \
+         onboard/e2e-check.sh onboard/make-autoregister-manifest.sh onboard/cloud-init-k3s-swch.yaml; do
+  sudo curl -fsSL "$B/$f" -o "$(basename $f)"; done
+sudo chmod +x *.sh
+```
+
+### Requirements for a new host
+
+| # | Requirement | Check (on the new host unless stated) |
+|---|-------------|---------------------------------------|
+| 1 | Linux VM with **k3s** (single node or a cluster; the control-plane node runs the gateway) | `sudo k3s kubectl get nodes` → `Ready` |
+| 2 | k3s **Traefik** ingress enabled (k3s default; not installed with `--disable traefik`) | `sudo k3s kubectl get crd ingressroutes.traefik.io` |
+| 3 | **Inbound** TCP 80 from host B (193.225.251.34) | on host B: `curl -I http://<new-ip>/` → any HTTP answer (404 before onboarding) |
+| 4 | **Outbound** TCP 80 to host B | `curl -s -o /dev/null -w '%{http_code}' http://193.225.251.34/swch-metrics-ui/api/register` → `405` |
+| 5 | Outbound HTTPS to `ghcr.io` to pull the image (air-gapped: import it, see below) | `sudo k3s crictl pull ghcr.io/georgegeorgakakos/k3s-metrics-gateway:0.3.1` |
+| 6 | **Unique cluster name**: the hostname (zero-touch) or `CLUSTER_NAME` (one command), lowercase | `hostname` |
+| 7 | The IP that host B uses to reach the host is a node IP, or is given with `--node-external-ip` / `PUBLIC_HOST` | `hostname -I`; `sudo k3s kubectl get node -o wide` |
+| 8 | ~100 MiB RAM, 0.05 CPU for the gateway | — |
+
+Air-gapped host: on a machine with internet `docker pull ghcr.io/georgegeorgakakos/k3s-metrics-gateway:0.3.1 &&
+docker save ghcr.io/georgegeorgakakos/k3s-metrics-gateway:0.3.1 -o gw.tar`, copy `gw.tar`, then
+`sudo k3s ctr images import gw.tar`.
+
 ---
 
 ## 0. One-time setup (existing hosts)
 
-Done once. Scripts: `hostB-EMS.zip` and `hostA.zip` (not in the repo, they hold host-specific settings).
+Done once. Scripts: [`deploy/hosts/`](../deploy/hosts/) (download commands above). They read the API key, UI
+password and token from the files and Secrets that stay on the hosts.
 
 | # | Where | Command | Result |
 |---|-------|---------|--------|
@@ -81,7 +122,7 @@ flowchart TB
 | Step | Where | Command |
 |------|-------|---------|
 | 1 | host B, once | `bash make-autoregister-manifest.sh` → `swch-metrics-gateway-autoregister.yaml` (mode 600: holds the token) |
-| 2a | existing k3s host | `sudo install -m 600 swch-metrics-gateway-autoregister.yaml /var/lib/rancher/k3s/server/manifests/` |
+| 2a | existing k3s host | copy the file (`scp`), then `sudo install -m 600 swch-metrics-gateway-autoregister.yaml /var/lib/rancher/k3s/server/manifests/` |
 | 2b | new VM | user-data from [`deploy/onboard/cloud-init-k3s-swch.yaml`](../deploy/onboard/cloud-init-k3s-swch.yaml) (paste `base64 -w0` of the file) |
 | 2c | cluster-builder | add the file to the manifests it deploys |
 | 3 | host B | `bash e2e-check.sh <node-name>` (or the Gateways tab) |
@@ -96,6 +137,15 @@ The same file works on every host. Each gateway works out:
 
 Names that clash get a suffix (`edge-07-2`). A host that is re-installed keeps its entry when its URL is the same.
 If the EMS host reaches the VM through a floating / NAT IP, advertise it with `--node-external-ip`.
+
+Check on the new host (about a minute after k3s has applied the file):
+
+```bash
+sudo k3s kubectl -n swarm-system get pods                                     # swch-metrics-gateway-… Running
+sudo k3s kubectl -n swarm-system logs deploy/swch-metrics-gateway | grep -i regist   # registered with … as '<name>'
+KEY=$(sudo k3s kubectl -n swarm-system get secret swch-metrics-gateway-auth -o jsonpath='{.data.API_KEY}' | base64 -d)
+curl -s -H "X-API-Key: $KEY" http://localhost/swch-metrics/registration | python3 -m json.tool | head -20
+```
 
 ---
 

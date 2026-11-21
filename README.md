@@ -531,6 +531,7 @@ Step-by-step guide with diagrams and the end-to-end test (UI → EMS → Optimus
 
 | Document | Content |
 |---|---|
+| [deploy/onboard/](deploy/onboard/) · [deploy/hosts/](deploy/hosts/) | Scripts for new k3s hosts (zero-touch manifest, one-command onboarding, end-to-end check) and for the existing hosts A and B |
 | [docs/add-k3s-host.md](docs/add-k3s-host.md) | **Step by step: add a new k3s host** (commands per host, diagrams) and the end-to-end test from the sidecar UI to the OptimusDB records |
 | [docs/multi-cluster.md](docs/multi-cluster.md) | One EMS sidecar for many k3s clusters; automatic gateway registration and onboarding of new hosts |
 | [docs/trust-optimusdb.md](docs/trust-optimusdb.md) | Trust evidence (A1 Availability, A3 Operational stability) persisted in OptimusDB `kbtrust` |

@@ -7,7 +7,9 @@
 - `deploy/onboard/make-autoregister-manifest.sh` (EMS host): one manifest (token, fleet API key, REGISTER_URL,
   gateway) for every new k3s host; `deploy/onboard/cloud-init-k3s-swch.yaml` example.
 - `deploy/onboard/e2e-check.sh`: end-to-end check (sidecar UI, EMS broker, OptimusDB kbtrust and ems_events);
-  `docs/add-k3s-host.md`: step-by-step guide with diagrams.
+  `docs/add-k3s-host.md`: step-by-step guide with diagrams, requirements checklist and file map.
+- `deploy/hosts/`: upgrade scripts for the existing EMS host and workload host (no secrets); READMEs for
+  `deploy/onboard/` and `deploy/hosts/`.
 
 ## 0.3.0: one sidecar, many k3s clusters; self-registration
 - **Many gateways per client**: `gateways:` list (one per k3s cluster). Every collector runs against every
