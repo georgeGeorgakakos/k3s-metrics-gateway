@@ -127,3 +127,12 @@ def test_onboard_template(tmp_path):
     assert "Secret/swch-metrics-gateway-auth" not in d and "ConfigMap/swch-cluster-identity" not in d
     assert "IngressRoute/swch-metrics-gateway" in d and _env(d, "GATEWAY_URL") is None
     assert _env(d, "REGISTER_TOKEN") is not None and _env(d, "ROOT_PATH")["value"] == "/swch-metrics"
+
+
+def test_zero_touch_manifest_has_no_per_host_values(tmp_path):
+    d, _ = render(tmp_path, "--role", "gateway", "--expose-gateway", "ingress", "--api-key", "fleet",
+                  "--swarm-id", "swarm-01", "--register-url", "http://ems/swch-metrics-ui/api/register",
+                  "--register-token", "tok")
+    assert _env(d, "PUBLIC_URL") is None                         # derived by the gateway itself
+    assert d["ConfigMap/swch-cluster-identity"]["data"]["CLUSTER_NAME"] == ""
+    assert _env(d, "REGISTER_URL")["value"] == "http://ems/swch-metrics-ui/api/register"

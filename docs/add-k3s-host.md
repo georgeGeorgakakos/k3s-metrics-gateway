@@ -1,8 +1,13 @@
 # Adding a k3s host to Swarmchestrate monitoring
 
 Every k3s cluster runs one **k3s Metrics Gateway**. The **EMS sidecar** on the EMS host polls all gateways,
-publishes the metrics to the **EMS broker**, and writes trust evidence to **OptimusDB**. A new k3s host only
-needs one command; it then **registers itself** with the EMS sidecar.
+publishes the metrics to the **EMS broker**, and writes trust evidence to **OptimusDB**. A new k3s host
+**registers itself** with the EMS sidecar. There are two ways to add one:
+
+| Way | Per new host | When |
+|-----|--------------|------|
+| **A · Zero-touch** ([section 1](#1-zero-touch-every-new-host-joins-by-itself)) | nothing: one shared manifest file in the k3s manifests folder (VM image, cloud-init, cluster-builder) | hosts C, D, E … created by automation |
+| **B · One command** ([section 2](#2-one-command-onboarding)) | `onboard-k3s-host.sh` with a chosen name / URL | an existing k3s host, or a custom name / URL |
 
 | Host | Role | Address |
 |------|------|---------|
@@ -38,20 +43,63 @@ tunnel). No other port has to be opened.
 
 ## 0. One-time setup (existing hosts)
 
-Done once, when moving to v0.3.0. Scripts: `hostB/` and `hostA/` folders of the release package.
+Done once. Scripts: `hostB-EMS.zip` and `hostA.zip` (not in the repo, they hold host-specific settings).
 
 | # | Where | Command | Result |
 |---|-------|---------|--------|
-| 0.1 | GitHub | push `main`, then `git tag v0.3.0 && git push origin v0.3.0` | Release builds `ghcr.io/georgegeorgakakos/k3s-metrics-gateway:0.3.0` |
-| 0.2 | Host B | `TRUST_NS=optimusddc bash upgrade-hostB-v0.3.0.sh` | sidecar v0.3.0, registration open, prints **REGISTRATION TOKEN** |
-| 0.3 | Host A | `bash upgrade-hostA-v0.3.0.sh <token>` | host A registers itself as `epm-server` |
+| 0.1 | GitHub | push `main`, then `git tag v0.3.1 && git push origin v0.3.1` | Release builds `ghcr.io/georgegeorgakakos/k3s-metrics-gateway:0.3.1` |
+| 0.2 | Host B | `TRUST_NS=optimusddc bash upgrade-hostB.sh` | sidecar v0.3.1, registration open, prints **REGISTRATION TOKEN** |
+| 0.3 | Host A | `bash upgrade-hostA.sh <token>` | host A registers itself as `epm-server` |
 | 0.4 | Host B | `bash e2e-check.sh epm-server` | `RESULT: ALL CHECKS PASSED ✓` |
+| 0.5 | Host B | `bash make-autoregister-manifest.sh` | `swch-metrics-gateway-autoregister.yaml` for zero-touch hosts (section 1) |
 
 Run them in `/opt/iccs/Scripts/SetupK3sMetric` on each host.
 
 ---
 
-## 1. Add a new k3s host
+## 1. Zero-touch: every new host joins by itself
+
+```mermaid
+flowchart TB
+  subgraph ONCE["Once, on host B (EMS)"]
+    M1["bash make-autoregister-manifest.sh"] --> M2[["swch-metrics-gateway-autoregister.yaml<br/>token · fleet API key · REGISTER_URL"]]
+  end
+  M2 --> IMG["VM image / cloud-init /<br/>cluster-builder manifests"]
+  IMG --> C["host C boots k3s"]
+  IMG --> D["host D boots k3s"]
+  IMG --> E["host E boots k3s"]
+  C -->|"k3s applies the manifests folder"| GC["gateway host-c<br/>name = node name<br/>URL = http://node-IP/swch-metrics"]
+  D -->|"same file"| GD["gateway host-d"]
+  E -->|"same file"| GE["gateway host-e"]
+  GC -->|"register + heartbeat"| S["EMS sidecar (host B)"]
+  GD --> S
+  GE --> S
+  S -->|"metrics"| EMS["EMS broker"]
+  S -->|"trust evidence"| ODB[("OptimusDB")]
+```
+
+| Step | Where | Command |
+|------|-------|---------|
+| 1 | host B, once | `bash make-autoregister-manifest.sh` → `swch-metrics-gateway-autoregister.yaml` (mode 600: holds the token) |
+| 2a | existing k3s host | `sudo install -m 600 swch-metrics-gateway-autoregister.yaml /var/lib/rancher/k3s/server/manifests/` |
+| 2b | new VM | user-data from [`deploy/onboard/cloud-init-k3s-swch.yaml`](../deploy/onboard/cloud-init-k3s-swch.yaml) (paste `base64 -w0` of the file) |
+| 2c | cluster-builder | add the file to the manifests it deploys |
+| 3 | host B | `bash e2e-check.sh <node-name>` (or the Gateways tab) |
+
+The same file works on every host. Each gateway works out:
+
+| Value | Default | Override (ConfigMap `swch-cluster-identity` or k3s flag) |
+|-------|---------|-----------------------------------------------------------|
+| cluster name | name of the first control-plane node (the VM hostname) | `CLUSTER_NAME` (or set the hostname, e.g. `hostname:` in cloud-init) |
+| URL for EMS | `http://<ExternalIP or InternalIP of that node>/swch-metrics` | `PUBLIC_HOST=<ip[:port]>`, `PUBLIC_URL=…`, or install k3s with `--node-external-ip <ip>` |
+| API key | the shared fleet key in the file | per-host `API_KEY` in the Secret |
+
+Names that clash get a suffix (`edge-07-2`). A host that is re-installed keeps its entry when its URL is the same.
+If the EMS host reaches the VM through a floating / NAT IP, advertise it with `--node-external-ip`.
+
+---
+
+## 2. One-command onboarding
 
 ```mermaid
 flowchart TD
@@ -61,7 +109,7 @@ flowchart TD
   P3["3 · On the new host: run onboard-k3s-host.sh<br/>REGISTER_URL · REGISTER_TOKEN · CLUSTER_NAME · SWARM_ID"] --> P4
   P4{"Script ends with<br/>'registered with EMS'?"}
   P4 -- yes --> P5["4 · Automatic: sidecar adds the gateway,<br/>saves it, starts polling it"]
-  P4 -- no --> T["Troubleshooting (section 4)"]
+  P4 -- no --> T["Troubleshooting (section 5)"]
   P5 --> P6["5 · On host B: bash e2e-check.sh &lt;cluster&gt;"]
   P6 --> P7{"ALL CHECKS PASSED?"}
   P7 -- yes --> D([Done: metrics in EMS, trust evidence in OptimusDB])
@@ -89,7 +137,7 @@ sudo k3s kubectl -n default get secret swch-metrics-gateway-auth -o jsonpath='{.
 ### Step 3 · Onboard (on the new host)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/v0.3.0/deploy/onboard/onboard-k3s-host.sh -o onboard-k3s-host.sh
+curl -fsSL https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/v0.3.1/deploy/onboard/onboard-k3s-host.sh -o onboard-k3s-host.sh
 sudo REGISTER_URL=http://193.225.251.34/swch-metrics-ui/api/register \
      REGISTER_TOKEN=<token from step 2> \
      CLUSTER_NAME=edge-07 SWARM_ID=swarm-01 \
@@ -139,7 +187,7 @@ Nothing has to be done on host A or host B.
 
 ---
 
-## 2. End-to-end test (UI → EMS → OptimusDB)
+## 3. End-to-end test (UI → EMS → OptimusDB)
 
 ```mermaid
 flowchart LR
@@ -211,7 +259,7 @@ bash e2e-check.sh                  # every registered cluster
 ```
 
 ```
-== 1. EMS sidecar                ✓ v0.3.0  ✓ registration open  ✓ cluster known
+== 1. EMS sidecar                ✓ v0.3.1  ✓ registration open  ✓ cluster known
 == 2. gateway edge-07            ✓ enabled  ✓ registered  ✓ heartbeat  ✓ reachable + key  ✓ polled
 == 3. samples from edge-07       ✓ 208 samples, 16 metrics (cluster, cluster_uid, swarm_id, gateway labels)
 == 4. EMS broker                 ✓ 41 messages with header cluster=edge-07  ✓ cluster in body
@@ -221,7 +269,7 @@ RESULT: ALL CHECKS PASSED ✓
 
 ---
 
-## 3. Disable or remove a host
+## 4. Disable or remove a host
 
 | Goal | How |
 |------|-----|
@@ -231,13 +279,15 @@ RESULT: ALL CHECKS PASSED ✓
 
 Documents already in OptimusDB stay there (history).
 
-## 4. Troubleshooting
+## 5. Troubleshooting
 
 | Symptom | Check | Fix |
 |---------|-------|-----|
 | onboarding: `cannot reach …/api/register` | `curl -I http://193.225.251.34/swch-metrics-ui/` from the new host | open the path from the new host to host B port 80 |
 | onboarding: `HTTP 401 invalid registration token` | token from step 2 | copy the token again (no spaces / newline) |
-| onboarding: `HTTP 403 registration is disabled` | host B `REGISTRATION_TOKEN` | run `upgrade-hostB-v0.3.0.sh` |
+| onboarding: `HTTP 403 registration is disabled` | host B `REGISTRATION_TOKEN` | run `upgrade-hostB.sh` |
+| zero-touch host never appears | on the host: `sudo k3s kubectl -n swarm-system logs deploy/swch-metrics-gateway \| grep -i regist` | `no public URL` → set `PUBLIC_HOST`; `HTTP 401` → rebuild the manifest (token changed); file not applied → check `/var/lib/rancher/k3s/server/manifests/` |
+| zero-touch host shows **error** in the Gateways tab | from host B: `curl -I <url shown>/health` | the node IP is private: install k3s with `--node-external-ip` or set `PUBLIC_HOST` |
 | T1 status **error** `…/health unreachable` | from host B: `curl -I http://<new-ip>/swch-metrics/health` | wrong `PUBLIC_URL` (private IP?) → onboard again with `PUBLIC_URL=http://<ip host B reaches>/swch-metrics` |
 | T1 **Test** says `HTTP 401` | API key mismatch | onboard again (the key is re-sent on registration) |
 | T1 **stale** | `curl -s -H "X-API-Key: <key>" http://localhost/swch-metrics/registration` on the new host | gateway down or host B unreachable; check `kubectl -n swarm-system logs deploy/swch-metrics-gateway` |

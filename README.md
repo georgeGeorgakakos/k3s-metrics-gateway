@@ -247,7 +247,7 @@ If the EMS metric model expects `*_SENSOR` topics, open the UI → **Sinks** →
 ### Gateway and EMS on different hosts
 
 When the workloads (e.g. OptimusDB) run in one k3s cluster and EMS runs in another, render one manifest per host.
-Since v0.3.0 the gateway can also register itself with the EMS sidecar (`--register-url`, `--register-token`), so
+Since v0.3 the gateway can also register itself with the EMS sidecar (`--register-url`, `--register-token`), so
 host B needs no `--gateway-url`. See [Many clusters and automatic registration](#many-clusters-and-automatic-registration).
 The sidecar still runs inside the EMS pod and calls the gateway over the network.
 On locked-down VMs, use the k3s Traefik ingress on port 80 (`--expose-gateway ingress`) so no extra ports are needed.
@@ -497,7 +497,7 @@ sidecar, and EMS receives that cluster's metrics, labelled with its `cluster`, w
 
 ```bash
 # on the new k3s host
-curl -fsSL https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/v0.3.0/deploy/onboard/onboard-k3s-host.sh -o onboard-k3s-host.sh
+curl -fsSL https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/v0.3.1/deploy/onboard/onboard-k3s-host.sh -o onboard-k3s-host.sh
 sudo REGISTER_URL=http://<ems-host>/swch-metrics-ui/api/register REGISTER_TOKEN=<token> \
      CLUSTER_NAME=edge-07 SWARM_ID=swarm-01 bash onboard-k3s-host.sh
 ```
@@ -519,6 +519,10 @@ sequenceDiagram
         H->>S: POST /api/register (heartbeat)
     end
 ```
+
+**Zero-touch:** `bash make-autoregister-manifest.sh` on the EMS host builds one file; dropped into
+`/var/lib/rancher/k3s/server/manifests/` of any new k3s host (VM image, cloud-init, cluster-builder) it makes that
+host register itself, named after its node, with no command on the host.
 
 Step-by-step guide with diagrams and the end-to-end test (UI → EMS → OptimusDB, `deploy/onboard/e2e-check.sh`):
 [docs/add-k3s-host.md](docs/add-k3s-host.md). Design and configuration: [docs/multi-cluster.md](docs/multi-cluster.md).

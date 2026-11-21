@@ -81,7 +81,7 @@ for g in targets:
         check("heartbeat < 10 min", hb is not None and hb < 600, f"{int(hb)} s ago" if hb is not None else "none yet")
     t = ui(f"/api/gateways/{urllib.parse.quote(gid)}/test", "POST")
     check("reachable + API key accepted", t.get("reachable") and t.get("authorized") and not t.get("error"),
-          t.get("error") or f"cluster {t.get('cluster_name')}, {t.get('nodes')} node(s)")
+          t.get("error") or f"cluster {t.get('cluster_name') or cl}, {t.get('nodes')} node(s)")
     check("polled by every collector", g["ok"] and not g["errors"],
           f"{g['collectors']} collectors, {g['samples_last_run']} samples last run, {g['errors']} errors")
 

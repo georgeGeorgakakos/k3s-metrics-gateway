@@ -1,6 +1,6 @@
 [project]
 name = "swch-metrics"
-version = "0.3.0"
+version = "0.3.1"
 description = "Swarmchestrate k3s Metrics Gateway (per-cluster metrics & topology API) and the EMS sidecar metrics client."
 readme = "README.md"
 requires-python = ">=3.12"

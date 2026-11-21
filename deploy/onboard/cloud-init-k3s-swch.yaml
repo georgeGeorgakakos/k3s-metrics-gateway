@@ -1,0 +1,23 @@
+#cloud-config
+# New VM -> k3s -> Swarmchestrate monitoring, with no manual step (zero-touch).
+#
+# 1. On the EMS host:  bash make-autoregister-manifest.sh
+# 2. Paste the base64 of swch-metrics-gateway-autoregister.yaml below:
+#       base64 -w0 swch-metrics-gateway-autoregister.yaml
+# 3. Create the VM with this file as user-data (OpenStack, AWS, Azure, Proxmox, multipass ...).
+#
+# k3s applies everything in /var/lib/rancher/k3s/server/manifests/ when it starts. The gateway then
+# registers itself with the EMS sidecar as cluster <hostname>, at http://<VM IP>/swch-metrics.
+hostname: edge-07                     # becomes the cluster name in EMS and OptimusDB (keep it unique)
+
+write_files:
+  - path: /var/lib/rancher/k3s/server/manifests/swch-metrics-gateway-autoregister.yaml
+    permissions: "0600"
+    owner: root:root
+    encoding: b64
+    content: PASTE_BASE64_OF_swch-metrics-gateway-autoregister.yaml_HERE
+
+runcmd:
+  # If the EMS host reaches this VM through a floating / public IP, advertise it, e.g.:
+  #   INSTALL_K3S_EXEC="--node-external-ip=<floating-ip>"
+  - curl -sfL https://get.k3s.io | sh -

@@ -321,3 +321,47 @@ def test_gateway_registration_endpoint(monkeypatch, fake_k8s):
     with TestClient(A.app) as c:
         assert c.get("/registration").json()["enabled"] is False
         assert c.post("/registration").status_code == 409
+
+
+# ------------------------------------------------------------------ zero-touch (v0.3.1)
+TOPO = {"cluster_id": "uid-9", "gateway": {"url": "http://swch-metrics-gateway.swarm-system.svc.cluster.local:8000"},
+        "nodes": [{"name": "worker-1", "roles": ["worker"], "internal_ip": "10.0.0.9"},
+                  {"name": "host-c", "roles": ["control-plane", "master"], "internal_ip": "10.0.0.5",
+                   "external_ip": "203.0.113.7"}]}
+
+
+@pytest.fixture
+def clean_env(monkeypatch):
+    for v in ("PUBLIC_URL", "PUBLIC_HOST", "GATEWAY_URL", "CLUSTER_NAME", "ROOT_PATH"):
+        monkeypatch.delenv(v, raising=False)
+    return monkeypatch
+
+
+def test_public_url_derived_from_control_plane_external_ip(clean_env):
+    assert R.public_url(TOPO) == "http://203.0.113.7/swch-metrics"
+    clean_env.setenv("ROOT_PATH", "/metrics-gw")
+    assert R.public_url(TOPO) == "http://203.0.113.7/metrics-gw"
+
+
+def test_public_url_precedence(clean_env):
+    clean_env.setenv("PUBLIC_HOST", "192.0.2.10:8080")
+    assert R.public_url(TOPO) == "http://192.0.2.10:8080/swch-metrics"
+    clean_env.setenv("GATEWAY_URL", "http://198.51.100.4/swch-metrics")          # external GATEWAY_URL wins
+    assert R.public_url(TOPO) == "http://198.51.100.4/swch-metrics"
+    clean_env.setenv("PUBLIC_URL", "https://edge.example/swch-metrics/")         # PUBLIC_URL wins over all
+    assert R.public_url(TOPO) == "https://edge.example/swch-metrics"
+
+
+def test_internal_ip_used_without_external(clean_env):
+    topo = {"nodes": [{"name": "solo", "roles": ["control-plane"], "internal_ip": "10.1.2.3"}]}
+    assert R.public_url(topo) == "http://10.1.2.3/swch-metrics"
+    assert R.public_url({}) == ""
+
+
+def test_cluster_name_defaults_to_control_plane_node(clean_env):
+    assert R.cluster_name(TOPO) == "host-c"
+    assert R.cluster_name({**TOPO, "cluster_name": "named"}) == "named"
+    clean_env.setenv("CLUSTER_NAME", "edge-09")
+    assert R.cluster_name(TOPO) == "edge-09"
+    p = R.registration_payload(TOPO)
+    assert p["cluster_name"] == "edge-09" and p["url"] == "http://203.0.113.7/swch-metrics"

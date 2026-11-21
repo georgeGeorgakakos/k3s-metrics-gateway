@@ -1,4 +1,4 @@
-# Many k3s clusters, one EMS sidecar (v0.3.0)
+# Many k3s clusters, one EMS sidecar (v0.3)
 
 One EMS metrics sidecar (`swch-metrics-client`) polls **any number of k3s clusters**. Every
 cluster runs one k3s Metrics Gateway. When a new k3s host is deployed, its gateway **registers
@@ -29,11 +29,13 @@ gets a suffix (`edge-07-2`).
 ## Onboard a new host
 
 Step-by-step guide with diagrams, commands per host and the end-to-end test: [add-k3s-host.md](add-k3s-host.md).
+For hosts created by automation (VM image, cloud-init, cluster-builder) use the **zero-touch** manifest from
+`deploy/onboard/make-autoregister-manifest.sh`: no command on the new host at all.
 
 On the new host (k3s with the default Traefik, port 80 reachable from the EMS host):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/v0.3.0/deploy/onboard/onboard-k3s-host.sh -o onboard-k3s-host.sh
+curl -fsSL https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/v0.3.1/deploy/onboard/onboard-k3s-host.sh -o onboard-k3s-host.sh
 sudo REGISTER_URL=http://193.225.251.34/swch-metrics-ui/api/register \
      REGISTER_TOKEN=<registration token of the EMS sidecar> \
      CLUSTER_NAME=edge-07 SWARM_ID=swarm-01 \

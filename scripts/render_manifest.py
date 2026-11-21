@@ -226,8 +226,9 @@ def build(a: argparse.Namespace) -> list[dict]:
                              {"name": "REGISTER_TOKEN", "valueFrom": {"secretKeyRef": {
                                  "name": "swch-metrics-gateway-auth", "key": "REGISTRATION_TOKEN", "optional": True}}},
                              *([] if onboard or not a.register_url else
-                               [{"name": "REGISTER_URL", "value": a.register_url},
-                                {"name": "PUBLIC_URL", "value": (a.public_url or gw_url).rstrip("/")}]),
+                               [{"name": "REGISTER_URL", "value": a.register_url}]
+                               + ([{"name": "PUBLIC_URL", "value": (a.public_url or a.gateway_url).rstrip("/")}]
+                                  if (a.public_url or a.gateway_url) else [])),
                              {"name": "REGISTER_INTERVAL", "value": str(a.register_interval)},
                              {"name": "POD_NAMESPACE", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}},
                              {"name": "TOPOLOGY_ENABLED", "value": "true"},

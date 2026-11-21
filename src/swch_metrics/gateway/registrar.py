@@ -10,8 +10,15 @@ Environment:
   REGISTER_URL        comma-separated sidecar registration URLs,
                       e.g. http://193.225.251.34/swch-metrics-ui/api/register
   REGISTER_TOKEN      shared registration token (must match the sidecar's REGISTRATION_TOKEN)
-  PUBLIC_URL          gateway URL as reachable from the EMS host (default: GATEWAY_URL)
+  PUBLIC_URL          gateway URL as reachable from the EMS host. Default: GATEWAY_URL when it is not an
+                      in-cluster address, otherwise derived (zero-touch): http://<PUBLIC_HOST><ROOT_PATH>
+  PUBLIC_HOST         host[:port] the EMS host uses to reach this cluster's Traefik. Default: ExternalIP
+                      (or k3s.io/external-ip) of the first control-plane node, then its InternalIP
+  CLUSTER_NAME        cluster name. Default: the topology's cluster name, then the first control-plane node
   REGISTER_INTERVAL   seconds between heartbeats (default 300)
+
+With none of PUBLIC_URL / CLUSTER_NAME set, one identical manifest can be dropped on every new k3s host
+(/var/lib/rancher/k3s/server/manifests/): each gateway works out its own URL and name and registers itself.
 """
 from __future__ import annotations
 
@@ -29,15 +36,45 @@ from .. import __version__
 log = logging.getLogger("swch.gateway.registrar")
 
 
+def _internal(url: str | None) -> bool:
+    """In-cluster addresses are useless to the EMS host."""
+    return not url or ".svc" in url or "://localhost" in url or "://127." in url
+
+
+def _first_control_plane(topo: dict) -> dict:
+    nodes = topo.get("nodes") or []
+    cp = [n for n in nodes if {"control-plane", "master"} & set(n.get("roles") or [])]
+    return (cp or nodes or [{}])[0]
+
+
+def public_url(topo: dict) -> str:
+    """Gateway URL for the EMS host: PUBLIC_URL > external GATEWAY_URL > http://<node IP><ROOT_PATH>."""
+    if os.getenv("PUBLIC_URL"):
+        return os.environ["PUBLIC_URL"].rstrip("/")
+    for u in (os.getenv("GATEWAY_URL"), (topo.get("gateway") or {}).get("url")):
+        if not _internal(u):
+            return u.rstrip("/")
+    node = _first_control_plane(topo)
+    host = os.getenv("PUBLIC_HOST") or node.get("external_ip") or node.get("internal_ip")
+    if not host:
+        return ""
+    path = (os.getenv("ROOT_PATH") or "/swch-metrics").rstrip("/")
+    return f"http://{host}{path}"
+
+
+def cluster_name(topo: dict) -> str | None:
+    return (os.getenv("CLUSTER_NAME") or topo.get("cluster_name")
+            or _first_control_plane(topo).get("name") or None)
+
+
 def registration_payload(topo: dict | None) -> dict[str, Any]:
     topo = topo or {}
-    gw = topo.get("gateway") or {}
     summ = topo.get("summary") or {}
     return {
         "schema": "swarmchestrate.eu/gateway-registration/v1",
-        "url": (os.getenv("PUBLIC_URL") or gw.get("url") or os.getenv("GATEWAY_URL") or "").rstrip("/"),
+        "url": public_url(topo),
         "api_key": os.getenv("API_KEY") or None,
-        "cluster_name": os.getenv("CLUSTER_NAME") or topo.get("cluster_name"),
+        "cluster_name": cluster_name(topo),
         "cluster_uid": topo.get("cluster_id"),
         "swarm_id": os.getenv("SWARM_ID") or topo.get("swarm_id"),
         "cloud": os.getenv("CLOUD") or None,
@@ -77,7 +114,8 @@ class Registrar(threading.Thread):
         payload = registration_payload(self.topo_fn())
         if not payload["url"]:
             for u in self.urls:
-                self.results[u] = {"status": "error", "error": "PUBLIC_URL / GATEWAY_URL not set",
+                self.results[u] = {"status": "error",
+                                   "error": "no public URL: set PUBLIC_URL or PUBLIC_HOST (node has no IP in the topology)",
                                    "at": _now()}
             return False
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}

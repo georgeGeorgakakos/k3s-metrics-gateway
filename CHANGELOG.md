@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1: zero-touch onboarding
+- The gateway works out its public URL (`http://<control-plane node ExternalIP/InternalIP><ROOT_PATH>`) and cluster
+  name (control-plane node name) when `PUBLIC_URL` / `CLUSTER_NAME` are not set; overrides `PUBLIC_HOST`,
+  `PUBLIC_URL`, `CLUSTER_NAME`. In-cluster `GATEWAY_URL`s are never sent to EMS.
+- `deploy/onboard/make-autoregister-manifest.sh` (EMS host): one manifest (token, fleet API key, REGISTER_URL,
+  gateway) for every new k3s host; `deploy/onboard/cloud-init-k3s-swch.yaml` example.
+- `deploy/onboard/e2e-check.sh`: end-to-end check (sidecar UI, EMS broker, OptimusDB kbtrust and ems_events);
+  `docs/add-k3s-host.md`: step-by-step guide with diagrams.
+
 ## 0.3.0: one sidecar, many k3s clusters; self-registration
 - **Many gateways per client**: `gateways:` list (one per k3s cluster). Every collector runs against every
   enabled gateway (or the ones in its `gateways:`). Samples carry `cluster`, `cluster_uid`, `swarm_id`, `gateway`.

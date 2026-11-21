@@ -20,7 +20,7 @@
 #   NAMESPACE    (default swarm-system)
 set -euo pipefail
 
-VERSION="${VERSION:-0.3.0}"
+VERSION="${VERSION:-0.3.1}"
 NS="${NAMESPACE:-swarm-system}"
 REPO_RAW="https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/v${VERSION}"
 : "${REGISTER_URL:?set REGISTER_URL, e.g. http://193.225.251.34/swch-metrics-ui/api/register}"
