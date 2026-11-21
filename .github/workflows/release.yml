@@ -47,7 +47,7 @@ jobs:
             -o dist/swch-metrics-gateway.yaml --patch-output dist/ems-sidecar-patch.yaml
           python scripts/render_manifest.py --onboard-template --image "${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}" \
             -o dist/swch-metrics-gateway-onboard.yaml
-          cp deploy/onboard/onboard-k3s-host.sh deploy/onboard/e2e-check.sh deploy/onboard/make-autoregister-manifest.sh deploy/onboard/cloud-init-k3s-swch.yaml dist/
+          cp deploy/onboard/onboard-k3s-host.sh deploy/onboard/e2e-check.sh deploy/onboard/kbtrust-query.sh deploy/onboard/make-autoregister-manifest.sh deploy/onboard/cloud-init-k3s-swch.yaml dist/
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
@@ -57,5 +57,6 @@ jobs:
             dist/swch-metrics-gateway-onboard.yaml
             dist/onboard-k3s-host.sh
             dist/e2e-check.sh
+            dist/kbtrust-query.sh
             dist/make-autoregister-manifest.sh
             dist/cloud-init-k3s-swch.yaml

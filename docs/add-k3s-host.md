@@ -345,4 +345,4 @@ Documents already in OptimusDB stay there (history).
 | T6 no `cluster` in events | EMS sink option `body_labels` | must contain `cluster` (default) |
 
 See also [multi-cluster.md](multi-cluster.md) (design, configuration, API) and
-[trust-optimusdb.md](trust-optimusdb.md) (trust document schema).
+[trust-optimusdb.md](trust-optimusdb.md) (trust document schema), [query-kbtrust.md](query-kbtrust.md) (every `kbtrust` query).

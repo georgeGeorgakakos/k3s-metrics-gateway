@@ -133,6 +133,9 @@ With `render_manifest.py` (new deployments): add
 
 ## Checking it
 
+All the read queries (filters, `curl` one-liners, the `kbtrust-query.sh` helper) are in
+[query-kbtrust.md](query-kbtrust.md). In short:
+
 ```bash
 # what the sidecar computed (host B, through Traefik)
 curl -s -u admin:$PW "http://193.225.251.34/swch-metrics-ui/api/trust" | python3 -m json.tool | head -60

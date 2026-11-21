@@ -9,6 +9,7 @@ Everything needed to add a k3s host (host C, D, E …) to Swarmchestrate monitor
 | [`cloud-init-k3s-swch.yaml`](cloud-init-k3s-swch.yaml) | new VM (user-data) | installs k3s with that file, so the VM joins on first boot |
 | [`onboard-k3s-host.sh`](onboard-k3s-host.sh) | **new k3s host** | one-command onboarding with a chosen name / URL (alternative to zero-touch) |
 | [`e2e-check.sh`](e2e-check.sh) | **EMS host (host B)** | end-to-end check of one cluster: sidecar UI → EMS broker → OptimusDB |
+| [`kbtrust-query.sh`](kbtrust-query.sh) | any host reaching OptimusDB | reads trust records from `kbtrust` as a table / JSON / count, see [docs/query-kbtrust.md](../../docs/query-kbtrust.md) |
 | [`../k3s/swch-metrics-gateway-onboard.yaml`](../k3s/swch-metrics-gateway-onboard.yaml) | (used by the scripts) | gateway template without per-host values |
 
 All of them are also attached to every GitHub release (`v0.3.1` …).
