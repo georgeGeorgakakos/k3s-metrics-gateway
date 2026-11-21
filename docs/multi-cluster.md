@@ -28,6 +28,8 @@ gets a suffix (`edge-07-2`).
 
 ## Onboard a new host
 
+Step-by-step guide with diagrams, commands per host and the end-to-end test: [add-k3s-host.md](add-k3s-host.md).
+
 On the new host (k3s with the default Traefik, port 80 reachable from the EMS host):
 
 ```bash

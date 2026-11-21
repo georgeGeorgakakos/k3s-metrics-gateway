@@ -1,0 +1,248 @@
+# Adding a k3s host to Swarmchestrate monitoring
+
+Every k3s cluster runs one **k3s Metrics Gateway**. The **EMS sidecar** on the EMS host polls all gateways,
+publishes the metrics to the **EMS broker**, and writes trust evidence to **OptimusDB**. A new k3s host only
+needs one command; it then **registers itself** with the EMS sidecar.
+
+| Host | Role | Address |
+|------|------|---------|
+| **Host B** | EMS + EMS sidecar (`swch-metrics-client`), UI `/swch-metrics-ui` | `193.225.251.34` |
+| **Host A** | k3s + OptimusDB + gateway `/swch-metrics` | `193.225.250.240` (`epm-server`) |
+| **New host** | k3s + gateway `/swch-metrics` | any host reachable from host B on port 80 |
+
+```mermaid
+flowchart TB
+  subgraph B["Host B · 193.225.251.34 · EMS"]
+    direction LR
+    B1["EMS sidecar<br/>swch-metrics-client<br/>UI /swch-metrics-ui"] -->|"STOMP localhost:61610"| B2["EMS broker"]
+  end
+  subgraph NEW["New k3s host · e.g. edge-07"]
+    direction LR
+    N1["k3s API :6443"] --> N2["gateway<br/>Traefik :80 /swch-metrics"]
+  end
+  subgraph A["Host A · 193.225.250.240 · epm-server"]
+    direction LR
+    A1["k3s API :6443"] --> A2["gateway<br/>Traefik :80 /swch-metrics"]
+    A4[("OptimusDB<br/>/optimusdb1<br/>kbtrust · ems_events")]
+  end
+  N2 <-->|"register + heartbeat ↑<br/>poll metrics ↓ (HTTP :80)"| B1
+  A2 <-->|"register + heartbeat ↑<br/>poll metrics ↓ (HTTP :80)"| B1
+  B1 -->|"trust evidence · crudput kbtrust (HTTP :80)"| A4
+  B2 -->|"EMS events /topic/> (autossh)"| A4
+```
+
+All traffic is plain HTTP on **port 80** through the k3s Traefik ingress (plus SSH :22 for the existing autossh
+tunnel). No other port has to be opened.
+
+---
+
+## 0. One-time setup (existing hosts)
+
+Done once, when moving to v0.3.0. Scripts: `hostB/` and `hostA/` folders of the release package.
+
+| # | Where | Command | Result |
+|---|-------|---------|--------|
+| 0.1 | GitHub | push `main`, then `git tag v0.3.0 && git push origin v0.3.0` | Release builds `ghcr.io/georgegeorgakakos/k3s-metrics-gateway:0.3.0` |
+| 0.2 | Host B | `TRUST_NS=optimusddc bash upgrade-hostB-v0.3.0.sh` | sidecar v0.3.0, registration open, prints **REGISTRATION TOKEN** |
+| 0.3 | Host A | `bash upgrade-hostA-v0.3.0.sh <token>` | host A registers itself as `epm-server` |
+| 0.4 | Host B | `bash e2e-check.sh epm-server` | `RESULT: ALL CHECKS PASSED ✓` |
+
+Run them in `/opt/iccs/Scripts/SetupK3sMetric` on each host.
+
+---
+
+## 1. Add a new k3s host
+
+```mermaid
+flowchart TD
+  S([New k3s host to monitor]) --> P1
+  P1["1 · Pre-checks on the new host<br/>k3s + Traefik running, port 80 reachable from host B"] --> P2
+  P2["2 · On host B: read the registration token"] --> P3
+  P3["3 · On the new host: run onboard-k3s-host.sh<br/>REGISTER_URL · REGISTER_TOKEN · CLUSTER_NAME · SWARM_ID"] --> P4
+  P4{"Script ends with<br/>'registered with EMS'?"}
+  P4 -- yes --> P5["4 · Automatic: sidecar adds the gateway,<br/>saves it, starts polling it"]
+  P4 -- no --> T["Troubleshooting (section 4)"]
+  P5 --> P6["5 · On host B: bash e2e-check.sh &lt;cluster&gt;"]
+  P6 --> P7{"ALL CHECKS PASSED?"}
+  P7 -- yes --> D([Done: metrics in EMS, trust evidence in OptimusDB])
+  P7 -- no --> T
+```
+
+### Step 1 · Pre-checks (on the new host)
+
+```bash
+sudo k3s kubectl get nodes                                   # node(s) Ready
+sudo k3s kubectl get crd ingressroutes.traefik.io            # Traefik CRDs present
+sudo k3s kubectl -n kube-system get svc traefik              # Traefik service on :80
+curl -s -o /dev/null -w '%{http_code}\n' http://193.225.251.34/swch-metrics-ui/api/register   # 405 = reachable
+hostname -I | awk '{print $1}'                               # IP that host B will use (PUBLIC_URL)
+```
+
+Pick a **unique cluster name** (lowercase, e.g. `edge-07`). It is used in EMS headers and OptimusDB `_id`s.
+
+### Step 2 · Read the registration token (on host B)
+
+```bash
+sudo k3s kubectl -n default get secret swch-metrics-gateway-auth -o jsonpath='{.data.REGISTRATION_TOKEN}' | base64 -d; echo
+```
+
+### Step 3 · Onboard (on the new host)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/georgeGeorgakakos/k3s-metrics-gateway/v0.3.0/deploy/onboard/onboard-k3s-host.sh -o onboard-k3s-host.sh
+sudo REGISTER_URL=http://193.225.251.34/swch-metrics-ui/api/register \
+     REGISTER_TOKEN=<token from step 2> \
+     CLUSTER_NAME=edge-07 SWARM_ID=swarm-01 \
+     bash onboard-k3s-host.sh
+```
+
+Optional: `PUBLIC_URL=http://<ip>/swch-metrics` (when the first IP is not the one host B reaches),
+`API_KEY=<key>` (default: generated), `CLOUD=`, `REGION=`, `ZONE=`.
+
+Expected output:
+
+```
+== 1/6 pre-checks            ✓ k3s reachable  ✓ Traefik CRDs present  ✓ EMS sidecar reachable (HTTP 405)
+== 2/6 identity              ✓ cluster edge-07, gateway URL http://<ip>/swch-metrics
+== 3/6 gateway manifest      ✓ applied (gateway, RBAC, Traefik route /swch-metrics)
+== 4/6 (re)start             ✓ gateway running
+== 5/6 local check           ✓ http://localhost/swch-metrics answers (topology 200)
+== 6/6 registration with EMS ✓ registered with EMS: "action":"registered" as "id":"edge-07"
+```
+
+### Step 4 · What happens automatically
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant N as New host: gateway
+    participant S as Host B: EMS sidecar
+    participant E as Host B: EMS broker
+    participant O as Host A: OptimusDB
+    N->>S: POST /api/register {url, api_key, cluster_name, cluster_uid, swarm_id} + Bearer token
+    S->>S: check token · add to gateways · save /data/client.yaml · reload
+    S-->>N: 200 {"id": "edge-07", "action": "registered"}
+    loop every collector interval (30 s - 2 min)
+        S->>N: GET /swch-metrics/pods/overview, /nodes/usage, /topology ... (X-API-Key)
+        S->>E: STOMP /topic/swch_k3s_* (header cluster=edge-07, body {..., "cluster": "edge-07"})
+    end
+    loop every 60 s
+        S->>O: crudput kbtrust: trust:edge-07:<kind>:<name>:A1 / A3, monitoring_snapshot
+    end
+    E->>O: /topic/> via autossh: ems_events
+    loop every 5 min
+        N->>S: POST /api/register (heartbeat, no reload)
+    end
+```
+
+Nothing has to be done on host A or host B.
+
+---
+
+## 2. End-to-end test (UI → EMS → OptimusDB)
+
+```mermaid
+flowchart LR
+  T1["T1 · Gateways tab<br/>cluster registered + ok"] --> T2["T2 · Samples tab<br/>filter by cluster"]
+  T2 --> T3["T3 · Dashboard<br/>series cluster/instance"]
+  T3 --> T4["T4 · EMS broker<br/>header cluster="]
+  T4 --> T5["T5 · OptimusDB kbtrust<br/>trust:cluster:..."]
+  T5 --> T6["T6 · OptimusDB ems_events<br/>body cluster"]
+  T6 --> T7(["T7 · e2e-check.sh<br/>all in one"])
+```
+
+UI: **http://193.225.251.34/swch-metrics-ui/** (user `admin`, password = `UI_PASSWORD` in `hostB-ems.yaml`).
+
+| Test | Where | What to do | Expected |
+|------|-------|------------|----------|
+| **T1** | UI → **Gateways** | find the new cluster; press **Test** | row `edge-07`, source **registered**, status **ok**, heartbeat < 5 min; toast *reachable · cluster edge-07 · N nodes* |
+| **T2** | UI → **Samples** | select the cluster in *All clusters* | rows with **Cluster** `edge-07` (node, pod, apiserver metrics) |
+| **T3** | UI → **Dashboard** | choose `swch_k3s_node_cpu_pct` | legend shows `edge-07/<node>` next to `epm-server/<node>` |
+| **T4** | host B shell | broker listen (below) | messages with `cluster = edge-07`, body ends with `"cluster": "edge-07"` |
+| **T5** | any shell | OptimusDB `kbtrust` query (below) | `trust:edge-07:…:A1` / `:A3` documents, `updated_at` < 2 min ago |
+| **T6** | any shell | OptimusDB `ems_events` (below) | recent events whose payload contains `"cluster": "edge-07"` |
+| **T7** | host B shell | `bash e2e-check.sh edge-07` | `RESULT: ALL CHECKS PASSED ✓` |
+
+**T4 · EMS broker (host B)**
+
+```bash
+sudo k3s kubectl -n default exec deploy/emsserver-ems-server -c swch-metrics-client -- python3 -c "
+import stomp,time
+class L(stomp.ConnectionListener):
+    def on_message(s,f):
+        if f.headers.get('cluster')=='edge-07': print(f.headers['destination'],'|',f.body)
+c=stomp.Connection([('localhost',61610)]);c.set_listener('',L());c.connect('aaa','111',wait=True)
+c.subscribe('/topic/>',id=1);time.sleep(30)"
+```
+
+**T5 · OptimusDB trust evidence (any host that reaches host A on port 80)**
+
+```bash
+ODB=http://193.225.250.240/optimusdb1/swarmkb/command
+# all trust evidence of the cluster
+curl -s -X POST $ODB -H 'Content-Type: application/json' \
+  -d '{"method":{"cmd":"crudget","argcnt":1},"dstype":"kbtrust","criteria":[{"type":"trust_evidence","cluster":"edge-07"}]}' \
+  | python3 -c "import sys,json;[print(d['_id'],d['value'],d['slo_met'],d['updated_at']) for d in json.load(sys.stdin)['data']]"
+# only availability of the nodes
+curl -s -X POST $ODB -H 'Content-Type: application/json' \
+  -d '{"method":{"cmd":"crudget","argcnt":1},"dstype":"kbtrust","criteria":[{"type":"trust_evidence","cluster":"edge-07","attribute_id":"A1","subject_kind":"node"}]}' | python3 -m json.tool
+# SLO violations across all clusters
+curl -s -X POST $ODB -H 'Content-Type: application/json' \
+  -d '{"method":{"cmd":"crudget","argcnt":1},"dstype":"kbtrust","criteria":[{"type":"trust_evidence","slo_met":false}]}' \
+  | python3 -c "import sys,json;[print(d['_id']) for d in json.load(sys.stdin)['data']]"
+```
+
+Record names: `trust:<cluster>:<pod|node|control-plane>:<namespace>/<name>:<A1|A3>`; hourly copies end with
+`:<YYYYMMDDTHH>` (`type: trust_evidence_history`); per-subject snapshot `monitoring:<cluster>:…`
+(`type: monitoring_snapshot`).
+
+**T6 · OptimusDB EMS events**
+
+```bash
+curl -s "http://193.225.250.240/optimusdb1/swarmkb/ems/events?limit=200&since_min=10" | grep -o 'edge-07' | wc -l
+```
+
+**T7 · Everything in one command (host B)**
+
+```bash
+cd /opt/iccs/Scripts/SetupK3sMetric
+bash e2e-check.sh edge-07          # one cluster
+bash e2e-check.sh                  # every registered cluster
+```
+
+```
+== 1. EMS sidecar                ✓ v0.3.0  ✓ registration open  ✓ cluster known
+== 2. gateway edge-07            ✓ enabled  ✓ registered  ✓ heartbeat  ✓ reachable + key  ✓ polled
+== 3. samples from edge-07       ✓ 208 samples, 16 metrics (cluster, cluster_uid, swarm_id, gateway labels)
+== 4. EMS broker                 ✓ 41 messages with header cluster=edge-07  ✓ cluster in body
+== 5. OptimusDB                  ✓ 12 A1 + 12 A3  ✓ updated < 5 min  ✓ monitoring_snapshot  ✓ history  ✓ ems_events
+RESULT: ALL CHECKS PASSED ✓
+```
+
+---
+
+## 3. Disable or remove a host
+
+| Goal | How |
+|------|-----|
+| Pause polling | UI → Gateways → switch off (stays registered) |
+| Remove permanently | on the host: `sudo k3s kubectl -n swarm-system delete deploy swch-metrics-gateway` (stops the heartbeat), then UI → Gateways → **Delete** |
+| Re-add | run `onboard-k3s-host.sh` again: same cluster UID → same entry |
+
+Documents already in OptimusDB stay there (history).
+
+## 4. Troubleshooting
+
+| Symptom | Check | Fix |
+|---------|-------|-----|
+| onboarding: `cannot reach …/api/register` | `curl -I http://193.225.251.34/swch-metrics-ui/` from the new host | open the path from the new host to host B port 80 |
+| onboarding: `HTTP 401 invalid registration token` | token from step 2 | copy the token again (no spaces / newline) |
+| onboarding: `HTTP 403 registration is disabled` | host B `REGISTRATION_TOKEN` | run `upgrade-hostB-v0.3.0.sh` |
+| T1 status **error** `…/health unreachable` | from host B: `curl -I http://<new-ip>/swch-metrics/health` | wrong `PUBLIC_URL` (private IP?) → onboard again with `PUBLIC_URL=http://<ip host B reaches>/swch-metrics` |
+| T1 **Test** says `HTTP 401` | API key mismatch | onboard again (the key is re-sent on registration) |
+| T1 **stale** | `curl -s -H "X-API-Key: <key>" http://localhost/swch-metrics/registration` on the new host | gateway down or host B unreachable; check `kubectl -n swarm-system logs deploy/swch-metrics-gateway` |
+| T5 no documents | UI → Sinks → `optimusdb-trust` error | trust sink disabled or OptimusDB unreachable from host B (`curl -I http://193.225.250.240/optimusdb1/`) |
+| T6 no `cluster` in events | EMS sink option `body_labels` | must contain `cluster` (default) |
+
+See also [multi-cluster.md](multi-cluster.md) (design, configuration, API) and
+[trust-optimusdb.md](trust-optimusdb.md) (trust document schema).

@@ -520,12 +520,14 @@ sequenceDiagram
     end
 ```
 
-See [docs/multi-cluster.md](docs/multi-cluster.md).
+Step-by-step guide with diagrams and the end-to-end test (UI → EMS → OptimusDB, `deploy/onboard/e2e-check.sh`):
+[docs/add-k3s-host.md](docs/add-k3s-host.md). Design and configuration: [docs/multi-cluster.md](docs/multi-cluster.md).
 
 ## Documentation
 
 | Document | Content |
 |---|---|
+| [docs/add-k3s-host.md](docs/add-k3s-host.md) | **Step by step: add a new k3s host** (commands per host, diagrams) and the end-to-end test from the sidecar UI to the OptimusDB records |
 | [docs/multi-cluster.md](docs/multi-cluster.md) | One EMS sidecar for many k3s clusters; automatic gateway registration and onboarding of new hosts |
 | [docs/trust-optimusdb.md](docs/trust-optimusdb.md) | Trust evidence (A1 Availability, A3 Operational stability) persisted in OptimusDB `kbtrust` |
 | [docs/archimate/](docs/archimate/) | ArchiMate 3.1 model (Open Exchange XML for Archi) and the two views as SVG / PNG |
